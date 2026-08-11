@@ -1,6 +1,6 @@
 {
   "name": "@danieljamestronca/app-icon-3d-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Export local app-icon images as portable 3D GLB files.",
   "keywords": [
     "glb",
