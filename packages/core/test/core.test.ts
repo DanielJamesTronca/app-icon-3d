@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createAppIconGeometry, getIconGeometryDimensions, getPresetMaterialValues, sampleEdgeColor } from '../src/index.js';
+import {
+  createAppIconGeometry,
+  createAppIconMaterials,
+  getIconGeometryDimensions,
+  getPresetMaterialValues,
+  sampleEdgeColor
+} from '../src/index.js';
 
 describe('core', () => {
   it('creates centred bevelled geometry with valid UVs', () => {
@@ -18,9 +24,57 @@ describe('core', () => {
     expect(Math.max(...capUvs)).toBeCloseTo(1, 5);
   });
 
+  it('mirrors the rear cap U so a 180deg spin still reads right-side-up', () => {
+    const geometry = createAppIconGeometry({ size: 2, depth: 0.3, quality: 'low' });
+    const positions = geometry.getAttribute('position');
+    const uv = geometry.getAttribute('uv');
+    const cap = geometry.groups.find((group) => group.materialIndex === 0)!;
+    const front = new Map<string, number>();
+    const rear = new Map<string, number>();
+    for (let offset = 0; offset < cap.count; offset += 1) {
+      const index = cap.start + offset;
+      const key = `${positions.getX(index).toFixed(4)},${positions.getY(index).toFixed(4)}`;
+      const target = positions.getZ(index) < 0 ? rear : front;
+      target.set(key, uv.getX(index));
+    }
+    expect(front.size).toBeGreaterThan(0);
+    expect(rear.size).toBeGreaterThan(0);
+    for (const [key, frontU] of front) {
+      const rearU = rear.get(key);
+      expect(rearU).toBeDefined();
+      expect(rearU!).toBeCloseTo(1 - frontU, 5);
+    }
+  });
+
+  it('honours an explicit bevelSegments override', () => {
+    const coarse = createAppIconGeometry({ quality: 'high', bevelSegments: 1 });
+    const cap = coarse.groups.find((group) => group.materialIndex === 1)!;
+    const fine = createAppIconGeometry({ quality: 'high' });
+    const fineCap = fine.groups.find((group) => group.materialIndex === 1)!;
+    expect(cap.count).toBeLessThan(fineCap.count);
+  });
+
   it('exposes stable preset values', () => {
     expect(getPresetMaterialValues('aluminum')).toMatchObject({ metalness: 0.9, roughness: 0.28 });
     expect(getPresetMaterialValues('glass').transmission).toBe(0.45);
+  });
+
+  it('applies envMapIntensity and per-material overrides', () => {
+    const materials = createAppIconMaterials({
+      preset: 'ceramic',
+      envMapIntensity: 0.9,
+      overrides: {
+        face: { roughness: 0.34, clearcoat: 0.62, envMapIntensity: 0.78 },
+        edge: { roughness: 0.25, metalness: 0.08 }
+      }
+    });
+    expect(materials.face.roughness).toBeCloseTo(0.34, 5);
+    expect(materials.face.clearcoat).toBeCloseTo(0.62, 5);
+    expect(materials.face.envMapIntensity).toBeCloseTo(0.78, 5);
+    expect(materials.edge.roughness).toBeCloseTo(0.25, 5);
+    expect(materials.edge.metalness).toBeCloseTo(0.08, 5);
+    expect(materials.edge.envMapIntensity).toBeCloseTo(0.9, 5);
+    materials.dispose();
   });
 
   it('samples perimeter pixels deterministically', () => {

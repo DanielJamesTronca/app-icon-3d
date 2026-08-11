@@ -17,6 +17,8 @@ export interface IconGeometryOptions {
   /** Bevel size. */
   bevel?: number;
   quality?: IconQuality;
+  /** Bevel curve segments. Defaults to half the quality's curve segments. */
+  bevelSegments?: number;
 }
 
 const qualitySegments: Record<IconQuality, number> = { low: 24, medium: 48, high: 72 };
@@ -51,7 +53,8 @@ export function createAppIconGeometry(options: IconGeometryOptions = {}): Buffer
     cornerRadius = 0.22,
     depth = 0.28,
     bevel = 0.06,
-    quality = 'medium'
+    quality = 'medium',
+    bevelSegments
   } = options;
   const segments = qualitySegments[quality];
   const effectiveBevel = Math.min(Math.max(bevel, 0), size / 4, Math.max(0, depth / 2 - 0.0001));
@@ -62,7 +65,7 @@ export function createAppIconGeometry(options: IconGeometryOptions = {}): Buffer
     bevelEnabled: effectiveBevel > 0,
     bevelThickness: effectiveBevel,
     bevelSize: effectiveBevel,
-    bevelSegments: Math.max(1, Math.ceil(segments / 2)),
+    bevelSegments: Math.max(1, bevelSegments ?? Math.ceil(segments / 2)),
     curveSegments: segments
   };
   const geometry = new ExtrudeGeometry(createSquircleShape(faceSize, cornerRadius), extrudeOptions);
@@ -84,11 +87,13 @@ export function createAppIconGeometry(options: IconGeometryOptions = {}): Buffer
     const width = Math.max(maxX - minX, Number.EPSILON);
     const height = Math.max(maxY - minY, Number.EPSILON);
     for (let index = cap.start; index < cap.start + cap.count; index += 1) {
-      uvs.setXY(
-        index,
-        (positions.getX(index) - minX) / width,
-        (positions.getY(index) - minY) / height
-      );
+      const u = (positions.getX(index) - minX) / width;
+      // Front and rear caps share the same x/y outline, so a naive x-derived U
+      // reads correctly on the front (+z) but mirrored on the rear (-z) once the
+      // icon spins 180deg and that cap faces the camera. Flipping U for rear
+      // vertices keeps the artwork right-reading from both sides.
+      const isRear = positions.getZ(index) < 0;
+      uvs.setXY(index, isRear ? 1 - u : u, (positions.getY(index) - minY) / height);
     }
     uvs.needsUpdate = true;
   }
