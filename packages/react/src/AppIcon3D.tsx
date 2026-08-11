@@ -1,6 +1,6 @@
 import { useFrame, useLoader, type ThreeEvent } from '@react-three/fiber';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Group, Mesh, TextureLoader } from 'three';
+import { Group, Mesh, SRGBColorSpace, TextureLoader } from 'three';
 import {
   createAppIconGeometry,
   createAppIconMaterials,
@@ -47,6 +47,10 @@ export function AppIcon3D({
   const geometry = useMemo(() => createAppIconGeometry({ quality }), [quality]);
   const materials = useMemo(() => createAppIconMaterials({ preset, edgeColor, map: texture }), [preset, edgeColor, texture]);
 
+  useEffect(() => {
+    texture.colorSpace = SRGBColorSpace;
+    texture.needsUpdate = true;
+  }, [texture]);
   useEffect(() => () => { geometry.dispose(); materials.dispose(); }, [geometry, materials]);
   useEffect(() => { if (mesh.current) onReady?.({ mesh: mesh.current, textureUrl: src }); }, [onReady, src, texture]);
 
@@ -72,6 +76,7 @@ export function AppIcon3D({
     rotation.current.y += dx * 0.012;
     rotation.current.velocityX = dy * 0.5;
     rotation.current.velocityY = dx * 0.5;
+    group.current?.rotation.set(rotation.current.x, rotation.current.y, 0);
   }, []);
   const onPointerEnd = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!dragging.current) return;
