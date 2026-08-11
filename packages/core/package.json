@@ -1,0 +1,16 @@
+{
+  "name": "@danieljamestronca/app-icon-3d-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --tsconfig tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "three": "^0.179.1" },
+  "devDependencies": { "@types/three": "^0.179.0" }
+}

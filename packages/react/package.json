@@ -1,0 +1,25 @@
+{
+  "name": "@danieljamestronca/app-icon-3d",
+  "version": "0.1.0",
+  "description": "A polished 3D app icon renderer for React Three Fiber.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md", "LICENSE"],
+  "peerDependencies": { "@react-three/fiber": "^9.0.0", "react": "^19.0.0", "react-dom": "^19.0.0", "three": "^0.179.0" },
+  "devDependencies": {
+    "@danieljamestronca/app-icon-3d-core": "workspace:*",
+    "@react-three/fiber": "^9.1.2",
+    "@types/three": "^0.179.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "three": "^0.179.1"
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}

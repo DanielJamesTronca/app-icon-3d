@@ -1,0 +1,29 @@
+name: Deploy demo
+
+on:
+  push:
+    branches: [main]
+    paths: [apps/demo/**, packages/**, pnpm-lock.yaml, .github/workflows/demo.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.13.1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Deploy to the dedicated Vercel project
+        run: |
+          npx vercel@latest pull --yes --environment=production
+          npx vercel@latest build --prod
+          npx vercel@latest deploy --prebuilt --prod
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

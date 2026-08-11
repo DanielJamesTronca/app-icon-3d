@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.13.1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }}, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm build:demo
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:demo
+      - run: pnpm pack:check
+      - name: Verify packed packages install
+        run: |
+          mkdir -p /tmp/app-icon-3d-install
+          cd /tmp/app-icon-3d-install
+          npm init -y
+          npm install "$GITHUB_WORKSPACE"/.packs/*.tgz three react react-dom @react-three/fiber
+          node --input-type=module -e "import { createAppIconGeometry } from '@danieljamestronca/app-icon-3d'; console.log(createAppIconGeometry().getAttribute('position').count)"
+          npx app-icon-3d --help
