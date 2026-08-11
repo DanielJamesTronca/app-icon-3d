@@ -1,14 +1,25 @@
 {
   "name": "@danieljamestronca/app-icon-3d-cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Export local app-icon images as portable 3D GLB files.",
   "license": "MIT",
   "type": "module",
-  "bin": { "app-icon-3d": "./dist/cli.js" },
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "bin": {
+    "app-icon-3d": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@gltf-transform/core": "^4.2.1",
     "sharp": "^0.34.2"
@@ -17,5 +28,7 @@
     "build": "tsup --config tsup.config.ts",
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": { "@danieljamestronca/app-icon-3d-core": "workspace:*" }
+  "devDependencies": {
+    "@danieljamestronca/app-icon-3d-core": "workspace:*"
+  }
 }
