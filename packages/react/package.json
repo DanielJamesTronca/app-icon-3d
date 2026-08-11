@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "description": "A polished 3D app icon renderer for React Three Fiber.",
   "license": "MIT",
+  "homepage": "https://app-icon-3d-demo.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DanielJamesTronca/app-icon-3d"
+  },
+  "bugs": {
+    "url": "https://github.com/DanielJamesTronca/app-icon-3d/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
