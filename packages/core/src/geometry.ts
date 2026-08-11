@@ -67,6 +67,31 @@ export function createAppIconGeometry(options: IconGeometryOptions = {}): Buffer
   };
   const geometry = new ExtrudeGeometry(createSquircleShape(faceSize, cornerRadius), extrudeOptions);
   geometry.translate(0, 0, -extrudeDepth / 2);
+  const cap = geometry.groups.find((group) => group.materialIndex === 0);
+  const positions = geometry.getAttribute('position');
+  const uvs = geometry.getAttribute('uv');
+  if (cap && positions && uvs) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let index = cap.start; index < cap.start + cap.count; index += 1) {
+      minX = Math.min(minX, positions.getX(index));
+      maxX = Math.max(maxX, positions.getX(index));
+      minY = Math.min(minY, positions.getY(index));
+      maxY = Math.max(maxY, positions.getY(index));
+    }
+    const width = Math.max(maxX - minX, Number.EPSILON);
+    const height = Math.max(maxY - minY, Number.EPSILON);
+    for (let index = cap.start; index < cap.start + cap.count; index += 1) {
+      uvs.setXY(
+        index,
+        (positions.getX(index) - minX) / width,
+        (positions.getY(index) - minY) / height
+      );
+    }
+    uvs.needsUpdate = true;
+  }
   geometry.computeVertexNormals();
   return geometry;
 }
