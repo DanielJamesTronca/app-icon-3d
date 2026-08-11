@@ -4,7 +4,7 @@ Turn your app icon into a tactile 3D object—on the web or in a portable GLB—
 
 [Live demo](https://app-icon-3d-demo.vercel.app) · [React package](https://www.npmjs.com/package/@danieljamestronca/app-icon-3d) · [CLI package](https://www.npmjs.com/package/@danieljamestronca/app-icon-3d-cli)
 
-![Rotating 3D app icon](./media/app-icon-3d.gif)
+![Rotating empty 3D app icon](./media/app-icon-3d.gif)
 
 ## React
 
