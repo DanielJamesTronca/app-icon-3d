@@ -47,12 +47,14 @@
     "@react-three/fiber": "^9.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "three": "^0.179.0"
+    "three": ">=0.179.0 <1.0.0"
   },
   "devDependencies": {
     "@danieljamestronca/app-icon-3d-core": "workspace:*",
     "@react-three/fiber": "^9.1.2",
+    "@react-three/test-renderer": "^9.1.1",
     "@types/three": "^0.179.0",
+    "jsdom": "^30.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.179.1"
