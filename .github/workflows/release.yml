@@ -38,7 +38,7 @@ jobs:
       - name: Confirm initial packages are public
         if: ${{ env.NPM_TOKEN_AVAILABLE == 'true' }}
         run: |
-          npm access public @danieljamestronca/app-icon-3d
-          npm access public @danieljamestronca/app-icon-3d-cli
+          npm access set status=public @danieljamestronca/app-icon-3d
+          npm access set status=public @danieljamestronca/app-icon-3d-cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
