@@ -11,6 +11,11 @@ describe('core', () => {
     const uv = geometry.getAttribute('uv');
     expect(uv.count).toBeGreaterThan(0);
     for (let index = 0; index < uv.count; index += 1) expect(Number.isFinite(uv.getX(index))).toBe(true);
+    const cap = geometry.groups.find((group) => group.materialIndex === 0);
+    expect(cap).toBeDefined();
+    const capUvs = Array.from({ length: cap!.count }, (_, offset) => uv.getX(cap!.start + offset));
+    expect(Math.min(...capUvs)).toBeCloseTo(0, 5);
+    expect(Math.max(...capUvs)).toBeCloseTo(1, 5);
   });
 
   it('exposes stable preset values', () => {
