@@ -21,7 +21,8 @@ jobs:
         with: { version: 10.13.1 }
       - uses: actions/setup-node@v4
         with: { node-version: 24, registry-url: https://registry.npmjs.org, cache: pnpm }
-      - run: npm install --global npm@latest
+      # Changesets' stable pnpm publisher uses --no-git-checks, supported by npm 11.
+      - run: npm install --global npm@11
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - uses: changesets/action@v1
