@@ -2,11 +2,25 @@
   "name": "@danieljamestronca/app-icon-3d",
   "version": "0.1.0",
   "description": "A polished 3D app icon renderer for React Three Fiber.",
+  "keywords": [
+    "three",
+    "threejs",
+    "react-three-fiber",
+    "r3f",
+    "3d",
+    "app-icon",
+    "icon",
+    "webgl",
+    "squircle",
+    "ios-icon"
+  ],
   "license": "MIT",
+  "author": "Daniel James Tronca",
   "homepage": "https://app-icon-3d-demo.vercel.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DanielJamesTronca/app-icon-3d"
+    "url": "git+https://github.com/DanielJamesTronca/app-icon-3d.git",
+    "directory": "packages/react"
   },
   "bugs": {
     "url": "https://github.com/DanielJamesTronca/app-icon-3d/issues"
