@@ -2,7 +2,7 @@
 
 Turn your app icon into a tactile 3D object—on the web or in a portable GLB—with no backend and no telemetry.
 
-[Live demo](https://app-icon-3d.vercel.app) · [React package](https://www.npmjs.com/package/@danieljamestronca/app-icon-3d) · [CLI package](https://www.npmjs.com/package/@danieljamestronca/app-icon-3d-cli)
+[Live demo](https://app-icon-3d-demo.vercel.app) · [React package](https://www.npmjs.com/package/@danieljamestronca/app-icon-3d) · [CLI package](https://www.npmjs.com/package/@danieljamestronca/app-icon-3d-cli)
 
 ## React
 
@@ -44,7 +44,7 @@ The `app-icon-3d` command accepts local PNG, JPEG, and WebP files. It normalizes
 | --- | --- | --- |
 | Glossy dielectric with a soft bevel | Brushed-metal feel with high metalness | Clear-coated, partially transmissive surface |
 
-Try each in the [interactive demo](https://app-icon-3d.vercel.app). The original SVG sample artwork in `apps/demo/public` is MIT-licensed with this repository.
+Try each in the [interactive demo](https://app-icon-3d-demo.vercel.app). The original SVG sample artwork in `apps/demo/public` is MIT-licensed with this repository.
 
 ## Supported formats and limits
 
