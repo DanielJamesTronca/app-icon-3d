@@ -1,6 +1,6 @@
 {
   "name": "@danieljamestronca/app-icon-3d",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A polished 3D app icon renderer for React Three Fiber.",
   "keywords": [
     "three",
