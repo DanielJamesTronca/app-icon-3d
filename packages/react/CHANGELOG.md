@@ -1,5 +1,11 @@
 # @danieljamestronca/app-icon-3d
 
+## 0.2.0
+
+### Minor Changes
+
+- 9486372: Add `AppIcon3DCollection` for rendering many icons in one shared WebGL canvas, positioned to match consumer-owned DOM layouts, plus the primitives behind it: `useIconPointer`, `useIconTexture`, `createIconMotion`/`updateIconMotion`/`applyIconMotion`, `projectRectToScene`, and `createIconEnvironment`. Also fix rear-cap artwork orientation, add geometry and material overrides, isolate environment resources per renderer, and report per-item texture failures.
+
 ## 0.1.1
 
 ### Patch Changes
