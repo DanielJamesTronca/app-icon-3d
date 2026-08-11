@@ -3,10 +3,10 @@ import { expect, test } from '@playwright/test';
 test('demo renders and remains usable on a narrow viewport', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /app icons/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /give your icon/i })).toBeVisible();
   const canvas = page.locator('canvas');
   await expect(canvas).toBeVisible();
-  await expect(page.getByText('Ready — drag to explore')).toBeVisible();
+  await expect(page.getByText('Drag to rotate')).toBeVisible();
   const bounds = await canvas.boundingBox();
   if (!bounds) throw new Error('Canvas did not expose a bounding box.');
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
@@ -16,5 +16,5 @@ test('demo renders and remains usable on a narrow viewport', async ({ page }) =>
   await page.getByRole('button', { name: 'glass' }).click();
   await page.setViewportSize({ width: 390, height: 740 });
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await expect(page.getByRole('heading', { name: /portable by default/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /keep the file portable/i })).toBeVisible();
 });
