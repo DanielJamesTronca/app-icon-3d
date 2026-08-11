@@ -35,9 +35,12 @@ jobs:
       - run: pnpm pack:check
       - name: Verify packed packages install
         run: |
-          mkdir -p /tmp/app-icon-3d-install
-          cd /tmp/app-icon-3d-install
-          npm init -y
-          npm install "$GITHUB_WORKSPACE"/.packs/*.tgz three react react-dom @react-three/fiber
-          node --input-type=module -e "import { createAppIconGeometry } from '@danieljamestronca/app-icon-3d'; console.log(createAppIconGeometry().getAttribute('position').count)"
-          npx app-icon-3d --help
+          for THREE_VERSION in 0.179.1 0.185.1; do
+            INSTALL_DIR="/tmp/app-icon-3d-install-$THREE_VERSION"
+            mkdir -p "$INSTALL_DIR"
+            cd "$INSTALL_DIR"
+            npm init -y
+            npm install "$GITHUB_WORKSPACE"/.packs/*.tgz "three@$THREE_VERSION" react react-dom @react-three/fiber
+            node --input-type=module -e "import { AppIcon3DCollection, createAppIconGeometry } from '@danieljamestronca/app-icon-3d'; console.log(typeof AppIcon3DCollection, createAppIconGeometry().getAttribute('position').count)"
+            npx app-icon-3d --help
+          done

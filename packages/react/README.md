@@ -36,22 +36,80 @@ The framework-free geometry and material helpers are exported too: `createAppIco
 
 ## `AppIcon3D` props
 
-| Prop | Type | Default | Description |
-| --- | --- | --- | --- |
-| `src` | `string` | *(required)* | Browser-reachable image URL, subject to CORS. |
-| `preset` | `'ceramic' \| 'aluminum' \| 'glass'` | `'ceramic'` | Material preset — see [Presets](#presets). |
-| `edgeColor` | `string` | sampled from artwork | Hex color for the icon's edge; omit to sample from the source image's perimeter. |
-| `autoRotate` | `boolean` | `true` | Spins the icon when idle. Respects `prefers-reduced-motion`. |
-| `interactive` | `boolean` | `true` | Enables pointer-drag rotation with inertia. |
-| `quality` | `'low' \| 'medium' \| 'high'` | `'medium'` | Mesh smoothness / segment count. |
-| `onReady` | `(event: { mesh: Mesh; textureUrl: string }) => void` | — | Called once the mesh and texture are ready. |
+| Prop          | Type                                                  | Default              | Description                                                                      |
+| ------------- | ----------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------- |
+| `src`         | `string`                                              | _(required)_         | Browser-reachable image URL, subject to CORS.                                    |
+| `preset`      | `'ceramic' \| 'aluminum' \| 'glass'`                  | `'ceramic'`          | Material preset — see [Presets](#presets).                                       |
+| `edgeColor`   | `string`                                              | sampled from artwork | Hex color for the icon's edge; omit to sample from the source image's perimeter. |
+| `autoRotate`  | `boolean`                                             | `true`               | Spins the icon when idle. Respects `prefers-reduced-motion`.                     |
+| `interactive` | `boolean`                                             | `true`               | Enables pointer-drag rotation with inertia.                                      |
+| `quality`     | `'low' \| 'medium' \| 'high'`                         | `'medium'`           | Mesh smoothness / segment count.                                                 |
+| `onReady`     | `(event: { mesh: Mesh; textureUrl: string }) => void` | —                    | Called once the mesh and texture are ready.                                      |
 
 `AppIcon3DCanvas` accepts all `AppIcon3D` props plus `canvasProps` (forwarded to the underlying React Three Fiber `<Canvas>`), `className`, and `style`.
 
+## Rendering multiple icons
+
+`AppIcon3DCollection` mirrors consumer-owned DOM slots into one shared WebGL canvas. It does not
+render cards, labels, links, or a specific CSS layout, so the same component can back a grid, list,
+or any responsive collection. Give each visual slot `data-app-icon-id={item.id}`, keep interaction
+and accessibility on the DOM, and drive the mutable motion objects with `useIconPointer`.
+
+```tsx
+import { useRef, useState } from 'react';
+import {
+  AppIcon3DCollection,
+  createIconMotion,
+  useIconPointer,
+  type IconMotion
+} from '@danieljamestronca/app-icon-3d';
+
+const items = [
+  { id: 'weather', src: '/icons/weather.png', edgeColor: '#3a6ff7' },
+  { id: 'notes', src: '/icons/notes.png', edgeColor: '#f7b23a' }
+];
+
+export function IconCollection() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [motions] = useState(
+    () => new Map(items.map((item, index) => [item.id, createIconMotion(index * 1.17)]))
+  );
+  const pointer = useIconPointer();
+
+  return (
+    <div ref={containerRef} className="relative grid grid-cols-2 gap-4">
+      {items.map((item) => {
+        const motion = motions.get(item.id) as IconMotion;
+        return (
+          <button key={item.id} className="relative aspect-square">
+            <div
+              data-app-icon-id={item.id}
+              className="absolute inset-0"
+              onPointerEnter={() => pointer.onPointerEnter(motion)}
+              onPointerLeave={() => pointer.onPointerLeave(motion)}
+              onPointerDown={(event) => pointer.onPointerDown(event, motion)}
+              onPointerMove={(event) => pointer.onPointerMove(event, motion)}
+              onPointerUp={(event) => pointer.onPointerUp(event, motion)}
+              onPointerCancel={() => pointer.onPointerCancel(motion)}
+            />
+          </button>
+        );
+      })}
+      <AppIcon3DCollection containerRef={containerRef} items={items} motions={motions} />
+    </div>
+  );
+}
+```
+
+The collection pauses off-screen, on hidden tabs, when `paused` is true, and after context loss.
+Use `onItemReady`, `onItemError`, and `onContextLost` to coordinate flat-image fallbacks. Shared
+scene defaults can be adjusted with geometry, material, lighting, camera, shadow, DPR, motion,
+and `iconScale` props; individual items can override their preset, edge material, and optical scale.
+
 ## Presets
 
-| Ceramic | Aluminum | Glass |
-| --- | --- | --- |
+| Ceramic                             | Aluminum                               | Glass                                        |
+| ----------------------------------- | -------------------------------------- | -------------------------------------------- |
 | Glossy dielectric with a soft bevel | Brushed-metal feel with high metalness | Clear-coated, partially transmissive surface |
 
 Try each in the [interactive demo](https://app-icon-3d-demo.vercel.app).
