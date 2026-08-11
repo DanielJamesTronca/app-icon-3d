@@ -33,3 +33,10 @@ jobs:
           # One-time bootstrap for the initial publish. This is removed after npm OIDC is configured.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'
+      - name: Confirm initial packages are public
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: |
+          npm access public @danieljamestronca/app-icon-3d
+          npm access public @danieljamestronca/app-icon-3d-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
