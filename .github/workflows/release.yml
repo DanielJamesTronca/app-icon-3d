@@ -14,8 +14,6 @@ jobs:
   release:
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
-    env:
-      NPM_TOKEN_AVAILABLE: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -32,13 +30,4 @@ jobs:
           version: pnpm changeset version
           publish: pnpm changeset publish
         env:
-          # One-time bootstrap for the initial publish. This is removed after npm OIDC is configured.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'
-      - name: Confirm initial packages are public
-        if: ${{ env.NPM_TOKEN_AVAILABLE == 'true' }}
-        run: |
-          npm access set status=public @danieljamestronca/app-icon-3d
-          npm access set status=public @danieljamestronca/app-icon-3d-cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
