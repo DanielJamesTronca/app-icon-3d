@@ -1,6 +1,6 @@
 import { useFrame, useLoader, type ThreeEvent } from '@react-three/fiber';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Group, Mesh, SRGBColorSpace, TextureLoader } from 'three';
+import { Group, Mesh, SRGBColorSpace, Texture, TextureLoader } from 'three';
 import {
   createAppIconGeometry,
   createAppIconMaterials,
@@ -27,6 +27,13 @@ export interface AppIcon3DProps {
 
 const initialRotation: IconRotation = { x: -0.14, y: -0.44, velocityX: 0, velocityY: 0 };
 
+function createDisplayTexture(source: Texture) {
+  const texture = source.clone();
+  texture.colorSpace = SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 /** Place inside an existing @react-three/fiber Canvas. */
 export function AppIcon3D({
   src,
@@ -43,15 +50,16 @@ export function AppIcon3D({
   const pointer = useRef({ x: 0, y: 0 });
   const rotation = useRef<IconRotation>({ ...initialRotation });
   const reducedMotion = useReducedMotion();
-  const texture = useLoader(TextureLoader, src);
+  const sourceTexture = useLoader(TextureLoader, src);
+  const texture = useMemo(() => createDisplayTexture(sourceTexture), [sourceTexture]);
   const geometry = useMemo(() => createAppIconGeometry({ quality }), [quality]);
   const materials = useMemo(() => createAppIconMaterials({ preset, edgeColor, map: texture }), [preset, edgeColor, texture]);
 
-  useEffect(() => {
-    texture.colorSpace = SRGBColorSpace;
-    texture.needsUpdate = true;
-  }, [texture]);
-  useEffect(() => () => { geometry.dispose(); materials.dispose(); }, [geometry, materials]);
+  useEffect(() => () => {
+    texture.dispose();
+    geometry.dispose();
+    materials.dispose();
+  }, [geometry, materials, texture]);
   useEffect(() => { if (mesh.current) onReady?.({ mesh: mesh.current, textureUrl: src }); }, [onReady, src, texture]);
 
   useFrame((_, delta) => {
