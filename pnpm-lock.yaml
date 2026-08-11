@@ -100,7 +100,7 @@ importers:
   packages/core:
     dependencies:
       three:
-        specifier: ^0.179.1
+        specifier: '>=0.179.0 <1.0.0'
         version: 0.179.1
     devDependencies:
       '@types/three':
