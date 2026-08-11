@@ -2,11 +2,24 @@
   "name": "@danieljamestronca/app-icon-3d-cli",
   "version": "0.1.0",
   "description": "Export local app-icon images as portable 3D GLB files.",
+  "keywords": [
+    "glb",
+    "gltf",
+    "3d",
+    "app-icon",
+    "icon",
+    "export",
+    "cli",
+    "squircle",
+    "sharp"
+  ],
   "license": "MIT",
+  "author": "Daniel James Tronca",
   "homepage": "https://app-icon-3d-demo.vercel.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DanielJamesTronca/app-icon-3d"
+    "url": "git+https://github.com/DanielJamesTronca/app-icon-3d.git",
+    "directory": "packages/cli"
   },
   "bugs": {
     "url": "https://github.com/DanielJamesTronca/app-icon-3d/issues"
@@ -15,6 +28,9 @@
     "access": "public"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.14"
+  },
   "bin": {
     "app-icon-3d": "./dist/cli.js"
   },
