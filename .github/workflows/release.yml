@@ -29,4 +29,6 @@ jobs:
           version: pnpm changeset version
           publish: pnpm changeset publish
         env:
+          # One-time bootstrap for the initial publish. This is removed after npm OIDC is configured.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'
