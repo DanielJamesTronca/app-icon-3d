@@ -7,3 +7,4 @@ coverage/
 .vercel/
 *.tsbuildinfo
 test-results/
+benchmark-results.json

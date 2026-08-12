@@ -30,8 +30,6 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm build:demo
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:demo
       - run: pnpm pack:check
       - name: Verify packed packages install
         run: |
@@ -44,3 +42,23 @@ jobs:
             node --input-type=module -e "import { AppIcon3DCollection, createAppIconGeometry } from '@danieljamestronca/app-icon-3d'; console.log(typeof AppIcon3DCollection, createAppIconGeometry().getAttribute('position').count)"
             npx app-icon-3d --help
           done
+
+  browser:
+    name: Browser (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.13.1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:demo
+      - run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - run: pnpm exec playwright test --project=${{ matrix.browser }}
+      - if: ${{ matrix.browser == 'chromium' }}
+        run: pnpm benchmark
