@@ -10,14 +10,14 @@ const textureState = vi.hoisted(() => ({ byUrl: new Map<string, Texture>() }));
 vi.mock('../src/useIconTexture.js', async () => {
   const { Texture: MockTexture, SRGBColorSpace: colorSpace } = await import('three');
   return {
-    useIconTexture(url: string) {
+    useIconTextureResource(url: string) {
       let texture = textureState.byUrl.get(url);
       if (!texture) {
         texture = new MockTexture();
         texture.colorSpace = colorSpace;
         textureState.byUrl.set(url, texture);
       }
-      return texture;
+      return { texture, edgeColor: '#123456', size: 1024 };
     }
   };
 });

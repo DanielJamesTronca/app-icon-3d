@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { DEFAULT_ICON_MOTION_TUNING, clamp, type IconMotion, type IconMotionTuning } from '@danieljamestronca/app-icon-3d-core';
+import { requestIconRender } from './render-signals.js';
 
 export interface IconPointerHandlers {
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, motion: IconMotion) => void;
@@ -36,6 +37,7 @@ export function useIconPointer(tuning: IconMotionTuning = DEFAULT_ICON_MOTION_TU
       motion.lastT = event.timeStamp;
       motion.emaVX = 0;
       motion.emaVY = 0;
+      requestIconRender(motion);
     },
     [tuning]
   );
@@ -48,6 +50,7 @@ export function useIconPointer(tuning: IconMotionTuning = DEFAULT_ICON_MOTION_TU
         const y = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
         motion.hoverYaw = clamp(x, -1, 1) * tuning.hoverYawAmplitude;
         motion.hoverPitch = clamp(-y, -1, 1) * tuning.hoverPitchAmplitude;
+        requestIconRender(motion);
         return;
       }
 
@@ -68,6 +71,7 @@ export function useIconPointer(tuning: IconMotionTuning = DEFAULT_ICON_MOTION_TU
       motion.lastX = event.clientX;
       motion.lastY = event.clientY;
       motion.lastT = event.timeStamp;
+      requestIconRender(motion);
     },
     [tuning]
   );
@@ -80,6 +84,7 @@ export function useIconPointer(tuning: IconMotionTuning = DEFAULT_ICON_MOTION_TU
       motion.dragging = false;
       motion.velY = clamp(motion.emaVX * motion.rotPerPxY, -tuning.flingClamp, tuning.flingClamp);
       motion.velX = clamp(-motion.emaVY * motion.rotPerPxX, -tuning.flingClamp, tuning.flingClamp);
+      requestIconRender(motion);
     },
     [tuning]
   );
@@ -92,16 +97,19 @@ export function useIconPointer(tuning: IconMotionTuning = DEFAULT_ICON_MOTION_TU
     motion.pointerInside = false;
     motion.hoverYaw = 0;
     motion.hoverPitch = 0;
+    requestIconRender(motion);
   }, []);
 
   const onPointerEnter = useCallback((motion: IconMotion) => {
     motion.pointerInside = true;
+    requestIconRender(motion);
   }, []);
 
   const onPointerLeave = useCallback((motion: IconMotion) => {
     motion.pointerInside = false;
     motion.hoverYaw = 0;
     motion.hoverPitch = 0;
+    requestIconRender(motion);
   }, []);
 
   const consumeClick = useCallback((motion: IconMotion) => {

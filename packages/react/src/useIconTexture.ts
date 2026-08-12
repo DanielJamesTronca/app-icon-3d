@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
+import type { Texture, WebGLRenderer } from 'three';
 import {
-  ClampToEdgeWrapping,
-  LinearFilter,
-  LinearMipmapLinearFilter,
-  SRGBColorSpace,
-  TextureLoader,
-  type Texture,
-  type WebGLRenderer
-} from 'three';
+  acquireIconTexture,
+  DEFAULT_MAX_TEXTURE_SIZE,
+  DEFAULT_TEXTURE_CACHE_BYTES,
+  getIconTextureBucket,
+  releaseIconTexture,
+  type IconTextureResource
+} from './texture-cache.js';
+
+export interface UseIconTextureOptions {
+  targetSize?: number;
+  maxTextureSize?: number;
+  textureCacheBytes?: number;
+}
 
 /**
  * Loads a texture with the color-space/mipmap/anisotropy settings a rotating,
@@ -18,9 +24,22 @@ import {
 export function useIconTexture(
   url: string,
   gl: WebGLRenderer,
-  onError?: (error: unknown) => void
+  onError?: (error: unknown) => void,
+  options: UseIconTextureOptions = {}
 ): Texture | null {
-  const [loaded, setLoaded] = useState<{ url: string; texture: Texture } | null>(null);
+  return useIconTextureResource(url, gl, onError, options)?.texture ?? null;
+}
+
+export function useIconTextureResource(
+  url: string,
+  gl: WebGLRenderer,
+  onError?: (error: unknown) => void,
+  options: UseIconTextureOptions = {}
+): IconTextureResource | null {
+  const maxTextureSize = options.maxTextureSize ?? DEFAULT_MAX_TEXTURE_SIZE;
+  const cacheBytes = options.textureCacheBytes ?? DEFAULT_TEXTURE_CACHE_BYTES;
+  const size = getIconTextureBucket(options.targetSize ?? maxTextureSize, maxTextureSize);
+  const [loaded, setLoaded] = useState<{ key: string; resource: IconTextureResource } | null>(null);
   const onErrorRef = useRef(onError);
 
   useEffect(() => {
@@ -31,30 +50,16 @@ export function useIconTexture(
     if (!url) return;
 
     let cancelled = false;
-    let loadedTexture: Texture | null = null;
-    const loader = new TextureLoader();
-
-    loader.load(
-      url,
-      (tex) => {
+    let acquired = false;
+    acquireIconTexture(gl, url, size, cacheBytes).then(
+      (resource) => {
         if (cancelled) {
-          tex.dispose();
+          releaseIconTexture(gl, url, size, cacheBytes);
           return;
         }
-
-        tex.colorSpace = SRGBColorSpace;
-        tex.generateMipmaps = true;
-        tex.minFilter = LinearMipmapLinearFilter;
-        tex.magFilter = LinearFilter;
-        tex.wrapS = ClampToEdgeWrapping;
-        tex.wrapT = ClampToEdgeWrapping;
-        tex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
-        tex.needsUpdate = true;
-
-        loadedTexture = tex;
-        setLoaded({ url, texture: tex });
+        acquired = true;
+        setLoaded({ key: `${url}\u0000${size}`, resource });
       },
-      undefined,
       (error) => {
         if (!cancelled) onErrorRef.current?.(error);
       }
@@ -62,11 +67,11 @@ export function useIconTexture(
 
     return () => {
       cancelled = true;
-      loadedTexture?.dispose();
+      if (acquired) releaseIconTexture(gl, url, size, cacheBytes);
     };
-  }, [url, gl]);
+  }, [url, gl, size, cacheBytes]);
 
   // Derived during render rather than reset via a second effect: as soon as `url` changes,
   // a texture loaded for the previous url stops being returned, with no extra render pass.
-  return loaded && loaded.url === url ? loaded.texture : null;
+  return loaded?.key === `${url}\u0000${size}` ? loaded.resource : null;
 }

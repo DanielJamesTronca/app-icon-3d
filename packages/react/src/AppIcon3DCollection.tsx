@@ -9,8 +9,9 @@ import {
   useState,
   type RefObject
 } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
-import { Canvas, useFrame, useStore, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useStore, useThree, type RootState } from '@react-three/fiber';
 import {
   DEFAULT_ICON_MOTION_TUNING,
   applyIconMotion,
@@ -26,7 +27,14 @@ import {
   type IconMotionTuning,
   type IconPreset
 } from '@danieljamestronca/app-icon-3d-core';
-import { useIconTexture } from './useIconTexture.js';
+import { subscribeIconRender } from './render-signals.js';
+import {
+  DEFAULT_MAX_TEXTURE_SIZE,
+  DEFAULT_TEXTURE_CACHE_BYTES,
+  disposeIconTextureCache,
+  getIconTextureBucket
+} from './texture-cache.js';
+import { useIconTextureResource } from './useIconTexture.js';
 import { useReducedMotion } from './useReducedMotion.js';
 
 export interface AppIcon3DCollectionItem {
@@ -52,18 +60,23 @@ export interface AppIcon3DCollectionCamera {
 
 export type AppIcon3DMotionMode = 'idle' | 'interaction' | 'static';
 
+export interface AppIcon3DCollectionStats {
+  totalItems: number;
+  visibleItems: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  textureSizes: number[];
+}
+
 export interface AppIcon3DCollectionProps {
-  /** Element whose `[data-app-icon-id]` descendants get measured and mirrored into the scene. */
+  /** Layout root whose `[data-app-icon-id]` descendants are mirrored into the 3D scene. */
   containerRef: RefObject<HTMLElement | null>;
+  /** Optional scrollport that clips the collection. Defaults to the browser viewport. */
+  viewportRef?: RefObject<HTMLElement | null>;
   items: AppIcon3DCollectionItem[];
-  /** One IconMotion per item id, created with `createIconMotion` and owned by the caller (pointer
-   *  handlers write into it directly; this component only reads it every frame). */
   motions: Map<string | number, IconMotion>;
-  /** Shared geometry parameters — one geometry instance is built and reused across every item. */
   geometry?: IconGeometryOptions;
-  /** Shared optical-size multiplier. `1` fits each icon inside its measured DOM slot. */
   iconScale?: number;
-  /** Default material envMapIntensity when an item doesn't set one via materialOverrides. */
   envMapIntensity?: number;
   environmentIntensity?: number;
   environmentRotationY?: number;
@@ -71,21 +84,28 @@ export interface AppIcon3DCollectionProps {
   ambientLightIntensity?: number;
   directionalLightIntensity?: number;
   directionalLightPosition?: [number, number, number];
-  /** Soft contact-shadow sprite under each icon. Pass `false` to disable. */
   shadow?: AppIcon3DCollectionShadow | false;
   camera?: AppIcon3DCollectionCamera;
   motionTuning?: IconMotionTuning;
-  /** Idle rotates visible icons, interaction animates only pointer/spring motion, static never advances motion. */
   motionMode?: AppIcon3DMotionMode;
-  /** Defaults to the browser's prefers-reduced-motion setting when omitted. */
   reducedMotion?: boolean;
-  /** External pause switch (e.g. a menu overlay open) layered on top of the built-in
-   *  viewport/tab-visibility gating. */
   paused?: boolean;
   dpr?: [number, number];
+  /** CSS pixels beyond the clipped canvas used to preload nearby icons. */
+  overscan?: number;
+  /** Largest decoded texture edge. Values above 1024 are clamped to 1024. */
+  maxTextureSize?: number;
+  /** Per-renderer and decoded-source LRU target. Active textures are never evicted. */
+  textureCacheBytes?: number;
+  /** Portal host for the fixed, pointer-free canvas. Defaults to document.body. */
+  portalTarget?: HTMLElement | null;
+  zIndex?: number;
   onItemReady?: (id: string | number) => void;
   onItemError?: (id: string | number, error: unknown) => void;
   onContextLost?: () => void;
+  onContextRestored?: () => void;
+  /** Diagnostic callback used by performance tooling and consumer observability. */
+  onRenderStats?: (stats: AppIcon3DCollectionStats) => void;
 }
 
 interface IconLayout {
@@ -93,6 +113,19 @@ interface IconLayout {
   top: number;
   width: number;
   height: number;
+}
+
+interface SurfaceRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface VisibleDescriptor {
+  id: string | number;
+  key: string;
+  textureSize: number;
 }
 
 const DEFAULT_CAMERA: Required<AppIcon3DCollectionCamera> = {
@@ -103,10 +136,33 @@ const DEFAULT_CAMERA: Required<AppIcon3DCollectionCamera> = {
 };
 const DEFAULT_DIRECTIONAL_LIGHT_POSITION: [number, number, number] = [2.2, 3, 4];
 const DEFAULT_SHADOW: AppIcon3DCollectionShadow = { opacity: 0.16 };
-
-// `process` isn't guaranteed to exist for every consumer of a browser-targeted ESM bundle
-// (only bundler-defined builds get it inlined), so this guards rather than assuming Node.
 const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+
+const windowViewportSubscribers = new Set<() => void>();
+let listeningToWindowViewport = false;
+const notifyWindowViewportSubscribers = () => {
+  windowViewportSubscribers.forEach((subscriber) => subscriber());
+};
+
+function subscribeWindowViewport(subscriber: () => void) {
+  windowViewportSubscribers.add(subscriber);
+  if (!listeningToWindowViewport) {
+    listeningToWindowViewport = true;
+    window.addEventListener('resize', notifyWindowViewportSubscribers, { passive: true });
+    window.addEventListener('scroll', notifyWindowViewportSubscribers, {
+      passive: true,
+      capture: true
+    });
+  }
+  return () => {
+    windowViewportSubscribers.delete(subscriber);
+    if (windowViewportSubscribers.size === 0 && listeningToWindowViewport) {
+      listeningToWindowViewport = false;
+      window.removeEventListener('resize', notifyWindowViewportSubscribers);
+      window.removeEventListener('scroll', notifyWindowViewportSubscribers, true);
+    }
+  };
+}
 
 function hasCoarsePointer(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
@@ -116,6 +172,28 @@ function getDefaultDpr(): [number, number] {
   if (typeof window === 'undefined') return [1, 2];
   if (hasCoarsePointer()) return [1, 1.25];
   return [1, window.innerWidth > 2560 ? 1.5 : 2];
+}
+
+function intersectRects(a: SurfaceRect, b: SurfaceRect): SurfaceRect {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.left + a.width, b.left + b.width);
+  const bottom = Math.min(a.top + a.height, b.top + b.height);
+  return {
+    left,
+    top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top)
+  };
+}
+
+function rectIntersects(a: SurfaceRect, b: SurfaceRect, overscan: number) {
+  return !(
+    a.left + a.width < b.left - overscan ||
+    a.left > b.left + b.width + overscan ||
+    a.top + a.height < b.top - overscan ||
+    a.top > b.top + b.height + overscan
+  );
 }
 
 function createSoftShadowTexture(): THREE.CanvasTexture {
@@ -129,17 +207,14 @@ function createSoftShadowTexture(): THREE.CanvasTexture {
   gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
   context.fillStyle = gradient;
   context.fillRect(0, 0, 128, 64);
-
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
 }
 
-/** Assigns a renderer-owned procedural studio environment to the collection scene. */
 function SceneEnvironment({ intensity, rotationY }: { intensity: number; rotationY: number }) {
   const store = useStore();
-
   useLayoutEffect(() => {
     const { gl, scene } = store.getState();
     const environment = createIconEnvironment(gl);
@@ -149,46 +224,62 @@ function SceneEnvironment({ intensity, rotationY }: { intensity: number; rotatio
       environment.dispose();
     };
   }, [store]);
-
   useLayoutEffect(() => {
     const { scene } = store.getState();
     scene.environmentIntensity = intensity;
     scene.environmentRotation.set(0, rotationY, 0);
   }, [store, intensity, rotationY]);
-
   return null;
 }
 
 function RendererSettings({ toneMappingExposure }: { toneMappingExposure: number }) {
   const store = useStore();
-
   useLayoutEffect(() => {
     const { gl } = store.getState();
     gl.toneMapping = THREE.NeutralToneMapping;
     gl.toneMappingExposure = toneMappingExposure;
   }, [store, toneMappingExposure]);
-
   return null;
 }
 
-function ContextLossListener({ onLost, onRestored }: { onLost: () => void; onRestored: () => void }) {
+function TextureCacheOwner() {
   const gl = useThree((state) => state.gl);
+  useEffect(() => () => disposeIconTextureCache(gl), [gl]);
+  return null;
+}
 
+function ContextLossListener({
+  onLost,
+  onRestored
+}: {
+  onLost: () => void;
+  onRestored: () => void;
+}) {
+  const gl = useThree((state) => state.gl);
   useEffect(() => {
     const handleContextLost = (event: Event) => {
       event.preventDefault();
       onLost();
     };
-    const handleContextRestored = () => onRestored();
     gl.domElement.addEventListener('webglcontextlost', handleContextLost);
-    gl.domElement.addEventListener('webglcontextrestored', handleContextRestored);
+    gl.domElement.addEventListener('webglcontextrestored', onRestored);
     return () => {
       gl.domElement.removeEventListener('webglcontextlost', handleContextLost);
-      gl.domElement.removeEventListener('webglcontextrestored', handleContextRestored);
+      gl.domElement.removeEventListener('webglcontextrestored', onRestored);
     };
   }, [gl, onLost, onRestored]);
-
   return null;
+}
+
+function motionNeedsAnotherFrame(motion: IconMotion, tuning: IconMotionTuning) {
+  return (
+    motion.dragging ||
+    motion.pointerInside ||
+    Math.abs(motion.velX) > 0.001 ||
+    Math.abs(motion.velY) > 0.001 ||
+    Math.abs(motion.hoverPitch - motion.tiltX) > 0.001 ||
+    Math.abs(motion.scale - tuning.baseScale) > 0.001
+  );
 }
 
 interface IconMeshProps {
@@ -196,65 +287,90 @@ interface IconMeshProps {
   motion: IconMotion;
   geometry: THREE.BufferGeometry;
   objectSize: { width: number; height: number; depth: number };
-  idleMotion: boolean;
-  staticMotion: boolean;
+  motionMode: AppIcon3DMotionMode;
   envMapIntensity: number;
   motionTuning: IconMotionTuning;
   shadowOpacity: number | null;
   shadowTexture: THREE.CanvasTexture | null;
+  textureSize: number;
+  maxTextureSize: number;
+  textureCacheBytes: number;
   onReady: () => void;
   onError: (error: unknown) => void;
 }
 
-/** One icon's scene contents: shared geometry, its own texture/materials, and per-frame motion. */
 function IconMesh({
   item,
   motion,
   geometry,
   objectSize,
-  idleMotion,
-  staticMotion,
+  motionMode,
   envMapIntensity,
   motionTuning,
   shadowOpacity,
   shadowTexture,
+  textureSize,
+  maxTextureSize,
+  textureCacheBytes,
   onReady,
   onError
 }: IconMeshProps) {
-  const gl = useThree((s) => s.gl);
-  const texture = useIconTexture(item.src, gl, onError);
+  const gl = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
+  const resource = useIconTextureResource(item.src, gl, onError, {
+    targetSize: textureSize,
+    maxTextureSize,
+    textureCacheBytes
+  });
   const groupRef = useRef<THREE.Group>(null);
-
   const materials = useMemo(
     () =>
       createAppIconMaterials({
         preset: item.preset,
-        edgeColor: item.edgeColor,
-        map: texture ?? undefined,
+        edgeColor: item.edgeColor ?? resource?.edgeColor,
+        map: resource?.texture,
         envMapIntensity,
         overrides: item.materialOverrides
       }),
-    [item.preset, item.edgeColor, texture, envMapIntensity, item.materialOverrides]
+    [
+      item.preset,
+      item.edgeColor,
+      item.materialOverrides,
+      resource,
+      envMapIntensity
+    ]
   );
 
   useEffect(() => () => materials.dispose(), [materials]);
+  useEffect(() => {
+    if (motionMode === 'static') return;
+    return subscribeIconRender(motion, invalidate);
+  }, [invalidate, motion, motionMode]);
 
   const readySource = useRef<string | null>(null);
   useEffect(() => {
-    if (texture && readySource.current !== item.src) {
+    if (resource && readySource.current !== item.src) {
       readySource.current = item.src;
       onReady();
+      invalidate();
     }
-  }, [item.src, texture, onReady]);
+  }, [item.src, resource, invalidate, onReady]);
 
   useLayoutEffect(() => {
     if (groupRef.current) applyIconMotion(groupRef.current, motion, motionTuning);
   }, [motion, motionTuning]);
 
   useFrame(({ clock }, rawDelta) => {
-    if (staticMotion) return;
-    updateIconMotion(motion, rawDelta, clock.getElapsedTime(), { idle: idleMotion }, motionTuning);
+    if (motionMode === 'static') return;
+    updateIconMotion(
+      motion,
+      rawDelta,
+      clock.getElapsedTime(),
+      { idle: motionMode === 'idle' },
+      motionTuning
+    );
     if (groupRef.current) applyIconMotion(groupRef.current, motion, motionTuning);
+    if (motionMode === 'interaction' && motionNeedsAnotherFrame(motion, motionTuning)) invalidate();
   });
 
   return (
@@ -282,35 +398,40 @@ function IconMesh({
 }
 
 interface PositionedIconProps extends IconMeshProps {
-  layout: IconLayout;
+  layoutKey: string;
+  layoutsRef: RefObject<Map<string, IconLayout>>;
   opticalScale: number;
 }
 
-function PositionedIcon({ layout, objectSize, opticalScale, ...meshProps }: PositionedIconProps) {
-  const size = useThree((state) => state.size);
-  const viewport = useThree((state) => state.viewport);
-  const { x, y, scale } = projectRectToScene(layout, size, viewport, objectSize);
-
+function PositionedIcon({
+  layoutKey,
+  layoutsRef,
+  objectSize,
+  opticalScale,
+  ...meshProps
+}: PositionedIconProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    const layout = layoutsRef.current.get(layoutKey);
+    if (!layout || !groupRef.current) return;
+    const { x, y, scale } = projectRectToScene(layout, state.size, state.viewport, objectSize);
+    groupRef.current.position.set(x, y, 0);
+    groupRef.current.scale.setScalar(scale * opticalScale);
+  });
   return (
-    <group position={[x, y, 0]} scale={scale * opticalScale}>
+    <group ref={groupRef}>
       <IconMesh {...meshProps} objectSize={objectSize} />
     </group>
   );
 }
 
 /**
- * Renders every item in `items` inside a single shared WebGL canvas, positioned to exactly
- * cover each item's `[data-app-icon-id]` DOM counterpart inside `containerRef`. The canvas
- * itself is `pointer-events: none`; render your own DOM overlay per item (sized via CSS,
- * hooked up with `useIconPointer`) so it keeps handling focus, keyboard access, and clicks.
- *
- * Automatically pauses the render loop — and hides the canvas without unmounting it, so there's
- * no flash on resume — when the container leaves the viewport, the tab is hidden, or `paused`
- * is set. On WebGL context loss it stops rendering and calls `onContextLost`; render your own
- * flat fallback in response.
+ * Mirrors consumer-owned DOM slots into one bounded, portaled WebGL surface. Only slots
+ * intersecting the collection's visible scrollport (plus overscan) own meshes and textures.
  */
 export function AppIcon3DCollection({
   containerRef,
+  viewportRef,
   items,
   motions,
   geometry: geometryOptions,
@@ -329,139 +450,44 @@ export function AppIcon3DCollection({
   reducedMotion,
   paused = false,
   dpr,
+  overscan = 128,
+  maxTextureSize = DEFAULT_MAX_TEXTURE_SIZE,
+  textureCacheBytes = DEFAULT_TEXTURE_CACHE_BYTES,
+  portalTarget,
+  zIndex = 0,
   onItemReady,
   onItemError,
-  onContextLost
+  onContextLost,
+  onContextRestored,
+  onRenderStats
 }: AppIcon3DCollectionProps) {
   const detectedReducedMotion = useReducedMotion();
-  const effectiveReducedMotion = reducedMotion ?? detectedReducedMotion;
-
-  const [inViewport, setInViewport] = useState(true);
+  const effectiveMotionMode = reducedMotion ?? detectedReducedMotion
+    ? motionMode === 'idle'
+      ? 'interaction'
+      : motionMode
+    : motionMode;
   const [pageVisible, setPageVisible] = useState(
     () => typeof document === 'undefined' || !document.hidden
   );
+  const [surfaceVisible, setSurfaceVisible] = useState(false);
   const [contextLost, setContextLost] = useState(false);
-  const [layouts, setLayouts] = useState<Record<string, IconLayout>>({});
-  const warnedRef = useRef(false);
+  const [visible, setVisible] = useState<VisibleDescriptor[]>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const layoutsRef = useRef(new Map<string, IconLayout>());
+  const invalidateRef = useRef<RootState['invalidate'] | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const visibleSignatureRef = useRef('');
+  const surfaceVisibleRef = useRef(false);
+  const statsSignatureRef = useRef('');
+  const warnedRef = useRef(new Set<string>());
   const itemIdsKey = items.map((item) => String(item.id)).join('\u0000');
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(([entry]) => setInViewport(entry.isIntersecting), {
-      rootMargin: '100px'
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [containerRef]);
-
-  useEffect(() => {
-    const handleVisibility = () => setPageVisible(!document.hidden);
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, []);
-
-  // Plain useEffect, not useLayoutEffect: `containerRef` is typically owned by an ANCESTOR
-  // element the caller renders around this component (see the README example). React commits
-  // refs and layout effects bottom-up, so a descendant's layout effect can still observe an
-  // ancestor's ref as null — that ancestor's own ref commits after this component's subtree
-  // does. A plain effect runs after the full commit (including ancestor refs), so it's the
-  // only options that reliably sees `containerRef.current` populated here.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
-      if (isDev && items.length > 0 && !warnedRef.current) {
-        warnedRef.current = true;
-        console.warn(
-          '[AppIcon3DCollection] containerRef.current is null, so no icons can be measured or rendered. ' +
-            'Make sure containerRef is attached to a mounted DOM element that AppIcon3DCollection renders inside of — see the README usage example.'
-        );
-      }
-      return;
-    }
-
-    const resizeObserver = new ResizeObserver(() => measure());
-    let observedTiles: HTMLElement[] = [];
-
-    const measure = () => {
-      const containerRect = container.getBoundingClientRect();
-      const next: Record<string, IconLayout> = {};
-      const tiles = Array.from(container.querySelectorAll<HTMLElement>('[data-app-icon-id]'));
-
-      for (const tile of tiles) {
-        const id = tile.dataset.appIconId!;
-        if (isDev && next[id] && !warnedRef.current) {
-          warnedRef.current = true;
-          console.warn(`[AppIcon3DCollection] Duplicate DOM slot id "${id}"; only the last slot is used.`);
-        }
-        const rect = tile.getBoundingClientRect();
-        next[id] = {
-          left: rect.left - containerRect.left,
-          top: rect.top - containerRect.top,
-          width: rect.width,
-          height: rect.height
-        };
-      }
-
-      setLayouts(next);
-    };
-
-    const observeTiles = () => {
-      observedTiles.forEach((tile) => resizeObserver.unobserve(tile));
-      observedTiles = Array.from(
-        container.querySelectorAll<HTMLElement>('[data-app-icon-id]')
-      );
-      if (isDev && items.length > 0 && observedTiles.length === 0 && !warnedRef.current) {
-        warnedRef.current = true;
-        console.warn(
-          '[AppIcon3DCollection] Found 0 elements with a [data-app-icon-id] attribute inside containerRef, ' +
-            `but received ${items.length} item(s). Give each item's DOM overlay element ` +
-            'data-app-icon-id={item.id} so AppIcon3DCollection can measure and position it.'
-        );
-      }
-      observedTiles.forEach((tile) => resizeObserver.observe(tile));
-      measure();
-    };
-
-    resizeObserver.observe(container);
-    observeTiles();
-    const mutationObserver = new MutationObserver(observeTiles);
-    mutationObserver.observe(container, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['data-app-icon-id']
-    });
-    return () => {
-      mutationObserver.disconnect();
-      resizeObserver.disconnect();
-    };
-  }, [containerRef, itemIdsKey, items.length]);
-
-  useEffect(() => {
-    if (!isDev) return;
-    const seen = new Set<string>();
-    for (const item of items) {
-      const id = String(item.id);
-      if (seen.has(id)) {
-        console.warn(`[AppIcon3DCollection] Duplicate item id "${id}"; ids must be unique.`);
-        return;
-      }
-      seen.add(id);
-    }
-  }, [itemIdsKey, items]);
-
   const resolvedDpr = useMemo(() => dpr ?? getDefaultDpr(), [dpr]);
   const resolvedCamera = useMemo(() => ({ ...DEFAULT_CAMERA, ...camera }), [camera]);
 
-  // Memoize the `geometry` prop object on the caller's side (e.g. useMemo) — an inline
-  // object literal here would rebuild this geometry, shared by every item, on every render.
   const sharedGeometry = useMemo(() => createAppIconGeometry(geometryOptions), [geometryOptions]);
   useEffect(() => () => sharedGeometry.dispose(), [sharedGeometry]);
-  const objectSize = useMemo(() => {
-    return getIconGeometryDimensions(sharedGeometry);
-  }, [sharedGeometry]);
-
+  const objectSize = useMemo(() => getIconGeometryDimensions(sharedGeometry), [sharedGeometry]);
   const shadowEnabled = shadow !== false;
   const shadowTexture = useMemo(
     () => (shadowEnabled ? createSoftShadowTexture() : null),
@@ -469,7 +495,158 @@ export function AppIcon3DCollection({
   );
   useEffect(() => () => shadowTexture?.dispose(), [shadowTexture]);
 
-  const active = inViewport && pageVisible && !paused && !contextLost;
+  useEffect(() => {
+    const handleVisibility = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const wrapper = wrapperRef.current;
+    if (!container || !wrapper) {
+      if (isDev && items.length > 0 && !warnedRef.current.has('container')) {
+        warnedRef.current.add('container');
+        console.warn('[AppIcon3DCollection] containerRef must point to a mounted layout root.');
+      }
+      return;
+    }
+
+    const itemByKey = new Map(items.map((item) => [String(item.id), item]));
+    if (isDev && itemByKey.size !== items.length && !warnedRef.current.has('items')) {
+      warnedRef.current.add('items');
+      console.warn('[AppIcon3DCollection] Item ids must be unique after string conversion.');
+    }
+
+    const measure = () => {
+      animationFrameRef.current = null;
+      const browserViewport: SurfaceRect = {
+        left: 0,
+        top: 0,
+        width: window.innerWidth,
+        height: window.innerHeight
+      };
+      const containerRect = container.getBoundingClientRect();
+      const scrollportRect = viewportRef?.current?.getBoundingClientRect() ?? browserViewport;
+      const surface = intersectRects(
+        intersectRects(containerRect, scrollportRect),
+        browserViewport
+      );
+      const hasSurface = surface.width > 0 && surface.height > 0;
+
+      wrapper.style.transform = `translate3d(${surface.left}px, ${surface.top}px, 0)`;
+      wrapper.style.width = `${Math.max(1, surface.width)}px`;
+      wrapper.style.height = `${Math.max(1, surface.height)}px`;
+      wrapper.style.visibility = hasSurface ? 'visible' : 'hidden';
+
+      if (surfaceVisibleRef.current !== hasSurface) {
+        surfaceVisibleRef.current = hasSurface;
+        setSurfaceVisible(hasSurface);
+      }
+
+      const nextLayouts = new Map<string, IconLayout>();
+      const nextVisible: VisibleDescriptor[] = [];
+      const seenSlots = new Set<string>();
+      const slots = container.querySelectorAll<HTMLElement>('[data-app-icon-id]');
+      slots.forEach((slot) => {
+        const key = slot.dataset.appIconId!;
+        if (seenSlots.has(key) && isDev && !warnedRef.current.has(`slot:${key}`)) {
+          warnedRef.current.add(`slot:${key}`);
+          console.warn(`[AppIcon3DCollection] Duplicate DOM slot id "${key}".`);
+        }
+        seenSlots.add(key);
+        const item = itemByKey.get(key);
+        if (!item) return;
+        const rect = slot.getBoundingClientRect();
+        const slotRect: SurfaceRect = {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height
+        };
+        if (!hasSurface || !rectIntersects(slotRect, surface, overscan)) return;
+        nextLayouts.set(key, {
+          left: rect.left - surface.left,
+          top: rect.top - surface.top,
+          width: rect.width,
+          height: rect.height
+        });
+        nextVisible.push({
+          id: item.id,
+          key,
+          textureSize: getIconTextureBucket(
+            Math.max(rect.width, rect.height) * resolvedDpr[1],
+            maxTextureSize
+          )
+        });
+      });
+      layoutsRef.current = nextLayouts;
+
+      const signature = nextVisible.map((entry) => `${entry.key}:${entry.textureSize}`).join('|');
+      if (signature !== visibleSignatureRef.current) {
+        visibleSignatureRef.current = signature;
+        setVisible(nextVisible);
+      }
+      const statsSignature = `${items.length}:${nextVisible.length}:${Math.round(surface.width)}:${Math.round(surface.height)}:${signature}`;
+      if (statsSignature !== statsSignatureRef.current) {
+        statsSignatureRef.current = statsSignature;
+        onRenderStats?.({
+          totalItems: items.length,
+          visibleItems: nextVisible.length,
+          canvasWidth: surface.width,
+          canvasHeight: surface.height,
+          textureSizes: nextVisible.map((entry) => entry.textureSize)
+        });
+      }
+      invalidateRef.current?.();
+    };
+
+    const scheduleMeasure = () => {
+      if (animationFrameRef.current === null) {
+        animationFrameRef.current = window.requestAnimationFrame(measure);
+      }
+    };
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(container);
+    if (viewportRef?.current) resizeObserver.observe(viewportRef.current);
+    const observeSlots = () => {
+      resizeObserver.disconnect();
+      resizeObserver.observe(container);
+      if (viewportRef?.current) resizeObserver.observe(viewportRef.current);
+      container
+        .querySelectorAll<HTMLElement>('[data-app-icon-id]')
+        .forEach((slot) => resizeObserver.observe(slot));
+      scheduleMeasure();
+    };
+    observeSlots();
+    const mutationObserver = new MutationObserver(observeSlots);
+    mutationObserver.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-app-icon-id']
+    });
+    const unsubscribeWindow = subscribeWindowViewport(scheduleMeasure);
+    const scrollport = viewportRef?.current;
+    scrollport?.addEventListener('scroll', scheduleMeasure, { passive: true });
+
+    return () => {
+      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      unsubscribeWindow();
+      scrollport?.removeEventListener('scroll', scheduleMeasure);
+    };
+  }, [
+    containerRef,
+    viewportRef,
+    itemIdsKey,
+    items,
+    maxTextureSize,
+    onRenderStats,
+    overscan,
+    resolvedDpr
+  ]);
 
   const handleReady = useCallback((id: string | number) => onItemReady?.(id), [onItemReady]);
   const handleError = useCallback(
@@ -480,17 +657,30 @@ export function AppIcon3DCollection({
     setContextLost(true);
     onContextLost?.();
   }, [onContextLost]);
-  const handleContextRestored = useCallback(() => setContextLost(false), []);
+  const handleContextRestored = useCallback(() => {
+    setContextLost(false);
+    onContextRestored?.();
+  }, [onContextRestored]);
 
-  return (
+  const active = surfaceVisible && pageVisible && !paused && !contextLost;
+  const target = portalTarget ?? (typeof document !== 'undefined' ? document.body : null);
+  if (!target) return null;
+
+  return createPortal(
     <div
+      ref={wrapperRef}
       aria-hidden="true"
+      data-app-icon-canvas=""
       style={{
-        position: 'absolute',
-        inset: 0,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: 1,
+        height: 1,
+        overflow: 'hidden',
         pointerEvents: 'none',
-        zIndex: 1,
-        visibility: active ? 'visible' : 'hidden'
+        visibility: 'hidden',
+        zIndex
       }}
     >
       <Canvas
@@ -505,9 +695,13 @@ export function AppIcon3DCollection({
         }}
         camera={resolvedCamera}
         dpr={resolvedDpr}
-        frameloop={active ? 'always' : 'never'}
+        frameloop={active && effectiveMotionMode === 'idle' ? 'always' : active ? 'demand' : 'never'}
+        onCreated={(state) => {
+          invalidateRef.current = state.invalidate;
+        }}
       >
         <ContextLossListener onLost={handleContextLost} onRestored={handleContextRestored} />
+        <TextureCacheOwner />
         <RendererSettings toneMappingExposure={toneMappingExposure} />
         <SceneEnvironment intensity={environmentIntensity} rotationY={environmentRotationY} />
         <ambientLight intensity={ambientLightIntensity} />
@@ -515,31 +709,35 @@ export function AppIcon3DCollection({
           position={directionalLightPosition}
           intensity={directionalLightIntensity}
         />
-        {items.map((item) => {
-          const layout = layouts[String(item.id)];
-          const motion = motions.get(item.id);
-          if (!layout || !motion) return null;
+        {visible.map((descriptor) => {
+          const item = items.find((candidate) => candidate.id === descriptor.id);
+          const motion = item ? motions.get(item.id) : undefined;
+          if (!item || !motion) return null;
           return (
             <PositionedIcon
-              key={item.id}
-              layout={layout}
+              key={descriptor.key}
+              layoutKey={descriptor.key}
+              layoutsRef={layoutsRef}
               objectSize={objectSize}
               opticalScale={iconScale * (item.scale ?? 1)}
               item={item}
               motion={motion}
               geometry={sharedGeometry}
-              idleMotion={motionMode === 'idle' && !effectiveReducedMotion}
-              staticMotion={motionMode === 'static'}
+              motionMode={effectiveMotionMode}
               envMapIntensity={envMapIntensity}
               motionTuning={motionTuning}
               shadowOpacity={shadowEnabled && shadow ? shadow.opacity : null}
               shadowTexture={shadowTexture}
+              textureSize={descriptor.textureSize}
+              maxTextureSize={maxTextureSize}
+              textureCacheBytes={textureCacheBytes}
               onReady={() => handleReady(item.id)}
               onError={(error) => handleError(item.id, error)}
             />
           );
         })}
       </Canvas>
-    </div>
+    </div>,
+    target
   );
 }

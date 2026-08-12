@@ -10,7 +10,7 @@ import {
   type IconQuality
 } from '@danieljamestronca/app-icon-3d-core';
 import { updateIconRotation, type IconRotation } from './interaction.js';
-import { useIconTexture } from './useIconTexture.js';
+import { useIconTextureResource } from './useIconTexture.js';
 import { useReducedMotion } from './useReducedMotion.js';
 
 export interface AppIconReadyEvent {
@@ -55,7 +55,7 @@ export function AppIcon3D({
   const rotation = useRef<IconRotation>({ ...initialRotation });
   const reducedMotion = useReducedMotion();
   const gl = useThree((state) => state.gl);
-  const texture = useIconTexture(src, gl, onError);
+  const resource = useIconTextureResource(src, gl, onError);
   const geometry = useMemo(
     () => createAppIconGeometry({ quality, ...geometryOptions }),
     [geometryOptions, quality]
@@ -64,12 +64,12 @@ export function AppIcon3D({
     () =>
       createAppIconMaterials({
         preset,
-        edgeColor,
-        map: texture ?? undefined,
+        edgeColor: edgeColor ?? resource?.edgeColor,
+        map: resource?.texture,
         envMapIntensity,
         overrides: materialOverrides
       }),
-    [preset, edgeColor, texture, envMapIntensity, materialOverrides]
+    [preset, edgeColor, resource, envMapIntensity, materialOverrides]
   );
 
   useEffect(() => () => {
@@ -77,8 +77,8 @@ export function AppIcon3D({
     materials.dispose();
   }, [geometry, materials]);
   useEffect(() => {
-    if (texture && mesh.current) onReady?.({ mesh: mesh.current, textureUrl: src });
-  }, [onReady, src, texture]);
+    if (resource && mesh.current) onReady?.({ mesh: mesh.current, textureUrl: src });
+  }, [onReady, resource, src]);
 
   useFrame((_, delta) => {
     const next = updateIconRotation(rotation.current, delta, autoRotate, reducedMotion, dragging.current);
