@@ -1,13 +1,16 @@
-import { useFrame, useLoader, type ThreeEvent } from '@react-three/fiber';
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Group, Mesh, SRGBColorSpace, Texture, TextureLoader } from 'three';
+import { Group, Mesh } from 'three';
 import {
   createAppIconGeometry,
   createAppIconMaterials,
+  type IconGeometryOptions,
+  type IconMaterialOverrides,
   type IconPreset,
   type IconQuality
 } from '@danieljamestronca/app-icon-3d-core';
 import { updateIconRotation, type IconRotation } from './interaction.js';
+import { useIconTexture } from './useIconTexture.js';
 import { useReducedMotion } from './useReducedMotion.js';
 
 export interface AppIconReadyEvent {
@@ -22,17 +25,14 @@ export interface AppIcon3DProps {
   autoRotate?: boolean;
   interactive?: boolean;
   quality?: IconQuality;
+  geometry?: IconGeometryOptions;
+  materialOverrides?: IconMaterialOverrides;
+  envMapIntensity?: number;
   onReady?: (event: AppIconReadyEvent) => void;
+  onError?: (error: unknown) => void;
 }
 
 const initialRotation: IconRotation = { x: -0.14, y: -0.44, velocityX: 0, velocityY: 0 };
-
-function createDisplayTexture(source: Texture) {
-  const texture = source.clone();
-  texture.colorSpace = SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
-}
 
 /** Place inside an existing @react-three/fiber Canvas. */
 export function AppIcon3D({
@@ -42,7 +42,11 @@ export function AppIcon3D({
   autoRotate = true,
   interactive = true,
   quality = 'medium',
-  onReady
+  geometry: geometryOptions,
+  materialOverrides,
+  envMapIntensity,
+  onReady,
+  onError
 }: AppIcon3DProps) {
   const group = useRef<Group>(null);
   const mesh = useRef<Mesh>(null);
@@ -50,17 +54,31 @@ export function AppIcon3D({
   const pointer = useRef({ x: 0, y: 0 });
   const rotation = useRef<IconRotation>({ ...initialRotation });
   const reducedMotion = useReducedMotion();
-  const sourceTexture = useLoader(TextureLoader, src);
-  const texture = useMemo(() => createDisplayTexture(sourceTexture), [sourceTexture]);
-  const geometry = useMemo(() => createAppIconGeometry({ quality }), [quality]);
-  const materials = useMemo(() => createAppIconMaterials({ preset, edgeColor, map: texture }), [preset, edgeColor, texture]);
+  const gl = useThree((state) => state.gl);
+  const texture = useIconTexture(src, gl, onError);
+  const geometry = useMemo(
+    () => createAppIconGeometry({ quality, ...geometryOptions }),
+    [geometryOptions, quality]
+  );
+  const materials = useMemo(
+    () =>
+      createAppIconMaterials({
+        preset,
+        edgeColor,
+        map: texture ?? undefined,
+        envMapIntensity,
+        overrides: materialOverrides
+      }),
+    [preset, edgeColor, texture, envMapIntensity, materialOverrides]
+  );
 
   useEffect(() => () => {
-    texture.dispose();
     geometry.dispose();
     materials.dispose();
-  }, [geometry, materials, texture]);
-  useEffect(() => { if (mesh.current) onReady?.({ mesh: mesh.current, textureUrl: src }); }, [onReady, src, texture]);
+  }, [geometry, materials]);
+  useEffect(() => {
+    if (texture && mesh.current) onReady?.({ mesh: mesh.current, textureUrl: src });
+  }, [onReady, src, texture]);
 
   useFrame((_, delta) => {
     const next = updateIconRotation(rotation.current, delta, autoRotate, reducedMotion, dragging.current);

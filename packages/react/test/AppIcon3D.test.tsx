@@ -5,25 +5,25 @@ import { create, waitFor } from '@react-three/test-renderer';
 import { Mesh, MeshPhysicalMaterial, SRGBColorSpace, Texture } from 'three';
 import { AppIcon3D } from '../src/AppIcon3D.js';
 
-vi.mock('three', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('three')>();
-  class MockTextureLoader {
-    load(_url: string, onLoad?: (texture: InstanceType<typeof actual.Texture>) => void) {
-      const texture = new actual.Texture();
-      queueMicrotask(() => onLoad?.(texture));
+const textureState = vi.hoisted(() => ({ byUrl: new Map<string, Texture>() }));
+
+vi.mock('../src/useIconTexture.js', async () => {
+  const { Texture: MockTexture, SRGBColorSpace: colorSpace } = await import('three');
+  return {
+    useIconTexture(url: string) {
+      let texture = textureState.byUrl.get(url);
+      if (!texture) {
+        texture = new MockTexture();
+        texture.colorSpace = colorSpace;
+        textureState.byUrl.set(url, texture);
+      }
       return texture;
     }
-    setCrossOrigin() {
-      return this;
-    }
-    setPath() {
-      return this;
-    }
-  }
-  return { ...actual, TextureLoader: MockTextureLoader };
+  };
 });
 
 beforeEach(() => {
+  textureState.byUrl.clear();
   vi.stubGlobal(
     'matchMedia',
     vi.fn().mockImplementation((query: string) => ({
@@ -52,30 +52,26 @@ async function renderIcon(props: Parameters<typeof AppIcon3D>[0]) {
 }
 
 describe('AppIcon3D', () => {
-  it('renders a cloned, sRGB-corrected display texture', async () => {
-    const cloneSpy = vi.spyOn(Texture.prototype, 'clone');
+  it('renders an sRGB-corrected display texture', async () => {
     const { renderer, mesh } = await renderIcon({ src: '/icon-clone.png' });
     const [face] = mesh.material as MeshPhysicalMaterial[];
 
-    expect(cloneSpy).toHaveBeenCalledTimes(1);
     expect(face.map).toBeInstanceOf(Texture);
     expect(face.map?.colorSpace).toBe(SRGBColorSpace);
 
     await renderer.unmount();
   });
 
-  it('disposes the texture, geometry, and materials on unmount', async () => {
+  it('disposes the geometry and materials on unmount', async () => {
     const { renderer, mesh } = await renderIcon({ src: '/icon-dispose.png' });
     const materials = mesh.material as MeshPhysicalMaterial[];
     const geometryDispose = vi.spyOn(mesh.geometry, 'dispose');
     const materialDisposes = materials.map((material) => vi.spyOn(material, 'dispose'));
-    const textureDispose = vi.spyOn(materials[0].map!, 'dispose');
 
     await renderer.unmount();
 
     expect(geometryDispose).toHaveBeenCalledTimes(1);
     materialDisposes.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
-    expect(textureDispose).toHaveBeenCalledTimes(1);
   });
 
   it('calls onReady once with the rendered mesh and source url', async () => {

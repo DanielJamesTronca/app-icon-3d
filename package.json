@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "pack:check": "pnpm build && pnpm --filter @danieljamestronca/app-icon-3d pack --pack-destination .packs && pnpm --filter @danieljamestronca/app-icon-3d-cli pack --pack-destination .packs"
+    "pack:check": "pnpm build && node scripts/verify-react-package.mjs && pnpm --filter @danieljamestronca/app-icon-3d pack --pack-destination .packs && pnpm --filter @danieljamestronca/app-icon-3d-cli pack --pack-destination .packs"
   },
   "devDependencies": {
     "@eslint/js": "^9.31.0",
