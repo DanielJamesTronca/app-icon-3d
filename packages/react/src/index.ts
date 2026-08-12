@@ -11,7 +11,8 @@ export {
   type AppIcon3DCollectionItem,
   type AppIcon3DCollectionShadow,
   type AppIcon3DCollectionCamera,
-  type AppIcon3DMotionMode
+  type AppIcon3DMotionMode,
+  type AppIcon3DCollectionStats
 } from './AppIcon3DCollection.js';
 export {
   useAppIcon3DCollection,
@@ -19,6 +20,10 @@ export {
   type AppIcon3DSlotProps
 } from './useAppIcon3DCollection.js';
 export { shouldAnimateIcon, updateIconRotation } from './interaction.js';
-export { useIconTexture } from './useIconTexture.js';
+export {
+  useIconTexture,
+  useIconTextureResource,
+  type UseIconTextureOptions
+} from './useIconTexture.js';
 export { useIconPointer, type IconPointerHandlers } from './useIconPointer.js';
 export * from '@danieljamestronca/app-icon-3d-core';

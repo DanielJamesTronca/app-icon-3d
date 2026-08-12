@@ -24,7 +24,7 @@ test('collection renders several icons through one shared canvas', async ({ page
   const collection = page.getByTestId('icon-collection');
   await collection.scrollIntoViewIfNeeded();
 
-  await expect(collection.locator('canvas')).toHaveCount(1);
+  await expect(page.locator('[data-app-icon-canvas] canvas')).toHaveCount(1);
   await expect(collection.locator('[data-app-icon-id]')).toHaveCount(4);
   await expect(collection.locator('.collection-fallback').first()).toHaveCSS('opacity', '0');
 
@@ -33,6 +33,6 @@ test('collection renders several icons through one shared canvas', async ({ page
   await expect(page.getByText('Selected orbit', { exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 740 });
-  await expect(collection.locator('canvas')).toHaveCount(1);
+  await expect(page.locator('[data-app-icon-canvas] canvas')).toHaveCount(1);
   await expect(collection.locator('[data-app-icon-id]')).toHaveCount(4);
 });

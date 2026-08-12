@@ -2,48 +2,40 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  LinearFilter,
-  LinearMipmapLinearFilter,
-  SRGBColorSpace,
-  Texture,
-  type WebGLRenderer
-} from 'three';
-import { useIconTexture } from '../src/useIconTexture.js';
+import type { WebGLRenderer } from 'three';
+import { useIconTextureResource } from '../src/useIconTexture.js';
 
-const loaderState = vi.hoisted(() => ({ textures: [] as Texture[] }));
+const cacheState = vi.hoisted(() => ({
+  acquired: [] as Array<{ url: string; size: number }>,
+  released: [] as Array<{ url: string; size: number }>
+}));
 
-vi.mock('three', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('three')>();
-  class MockTextureLoader {
-    load(
-      url: string,
-      onLoad?: (texture: InstanceType<typeof actual.Texture>) => void,
-      _onProgress?: unknown,
-      onError?: (error: unknown) => void
-    ) {
-      queueMicrotask(() => {
-        if (url.includes('missing')) {
-          onError?.(new Error(`Unable to load ${url}`));
-          return;
-        }
-        const texture = new actual.Texture();
-        loaderState.textures.push(texture);
-        onLoad?.(texture);
-      });
-      return new actual.Texture();
-    }
-  }
-  return { ...actual, TextureLoader: MockTextureLoader };
+vi.mock('../src/texture-cache.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/texture-cache.js')>();
+  const { Texture: MockTexture, SRGBColorSpace: colorSpace } = await import('three');
+  return {
+    ...actual,
+    acquireIconTexture: vi.fn(async (_renderer, url: string, size: number) => {
+      if (url.includes('missing')) throw new Error(`Unable to load ${url}`);
+      cacheState.acquired.push({ url, size });
+      const texture = new MockTexture();
+      texture.colorSpace = colorSpace;
+      return { texture, edgeColor: '#123456', size };
+    }),
+    releaseIconTexture: vi.fn((_renderer, url: string, size: number) => {
+      cacheState.released.push({ url, size });
+    })
+  };
 });
 
-const renderer = {
-  capabilities: { getMaxAnisotropy: () => 16 }
-} as WebGLRenderer;
+const renderer = {} as WebGLRenderer;
 
 function Probe({ url, onError }: { url: string; onError?: (error: unknown) => void }) {
-  const texture = useIconTexture(url, renderer, onError);
-  return <span>{texture ? 'loaded' : 'pending'}</span>;
+  const resource = useIconTextureResource(url, renderer, onError, {
+    targetSize: 220,
+    maxTextureSize: 1024
+  });
+  return <span>{resource ? `${resource.edgeColor}:${resource.size}` : 'pending'}</span>;
 }
 
 let root: Root;
@@ -51,7 +43,8 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  loaderState.textures.length = 0;
+  cacheState.acquired.length = 0;
+  cacheState.released.length = 0;
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -62,25 +55,18 @@ afterEach(() => {
   host.remove();
 });
 
-describe('useIconTexture', () => {
-  it('configures the loaded texture and disposes it on unmount', async () => {
+describe('useIconTextureResource', () => {
+  it('uses an adaptive bucket and releases the cached texture on unmount', async () => {
     await act(async () => root.render(<Probe url="/icon.png" />));
 
-    expect(host.textContent).toBe('loaded');
-    const texture = loaderState.textures[0];
-    expect(texture).toBeInstanceOf(Texture);
-    expect(texture.colorSpace).toBe(SRGBColorSpace);
-    expect(texture.minFilter).toBe(LinearMipmapLinearFilter);
-    expect(texture.magFilter).toBe(LinearFilter);
-    expect(texture.anisotropy).toBe(8);
-
-    const dispose = vi.spyOn(texture, 'dispose');
+    expect(host.textContent).toBe('#123456:256');
+    expect(cacheState.acquired).toEqual([{ url: '/icon.png', size: 256 }]);
     act(() => root.unmount());
-    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(cacheState.released).toEqual([{ url: '/icon.png', size: 256 }]);
     root = createRoot(host);
   });
 
-  it('reports loader failures without producing a texture', async () => {
+  it('reports loader failures without producing a resource', async () => {
     const onError = vi.fn();
     await act(async () => root.render(<Probe url="/missing.png" onError={onError} />));
 
