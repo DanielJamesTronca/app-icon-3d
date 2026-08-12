@@ -22,7 +22,13 @@ export function Icon() {
 }
 ```
 
-Or place `AppIcon3D` inside an existing React Three Fiber `<Canvas>`. It accepts `src`, `preset`, `edgeColor`, `autoRotate`, `interactive`, `quality`, and `onReady`.
+The convenience canvas is transparent by default so it composes with the host page. Pass
+`scenePreset="dark-studio"` for the original dark backdrop, or use `scene` and `canvasProps` to
+control its background, camera, lighting, environment, exposure, and renderer options.
+
+Or place `AppIcon3D` inside an existing React Three Fiber `<Canvas>`. In addition to image,
+interaction, and quality controls, it accepts geometry and material overrides, environment intensity,
+and ready/error callbacks.
 
 ```tsx
 <Canvas>
@@ -37,18 +43,15 @@ The framework-free geometry and material helpers are exported too: `createAppIco
 `AppIcon3DCollection` renders a whole set of icons in a single shared
 WebGL context, positioned to exactly cover DOM elements you already control. Render your own
 markup for layout, labels, and links; give each item's wrapper `data-app-icon-id={item.id}`, and
-the collection measures and mirrors it into the scene. The canvas itself is `pointer-events: none`, so
-`useIconPointer` drives interaction — hover yaw/pitch, drag-to-spin with fling inertia, and
-click-vs-drag detection — from plain DOM pointer events on your own elements, leaving your
-surrounding `<button>` or `<a>` free to handle focus, keyboard access, and navigation.
+the collection measures and mirrors it into the scene. The canvas itself is `pointer-events: none`;
+`useAppIcon3DCollection` supplies DOM interaction props for hover yaw/pitch, drag-to-spin, fling
+inertia, and click-vs-drag detection while surrounding buttons and links keep focus and navigation.
 
 ```tsx
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import {
   AppIcon3DCollection,
-  createIconMotion,
-  useIconPointer,
-  type IconMotion
+  useAppIcon3DCollection
 } from '@danieljamestronca/app-icon-3d';
 
 const items = [
@@ -58,40 +61,62 @@ const items = [
 
 export function IconGrid() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [motions] = useState(
-    () => new Map(items.map((item, i) => [item.id, createIconMotion(i * 1.17)]))
-  );
-  const pointer = useIconPointer();
+  const collection = useAppIcon3DCollection(items);
 
   return (
     <div ref={containerRef} className="relative grid grid-cols-2 gap-4">
       {items.map((item) => (
         <button key={item.id} className="relative aspect-square">
           <div
-            data-app-icon-id={item.id}
             className="absolute inset-0"
-            onPointerEnter={() => pointer.onPointerEnter(motions.get(item.id) as IconMotion)}
-            onPointerLeave={() => pointer.onPointerLeave(motions.get(item.id) as IconMotion)}
-            onPointerDown={(e) => pointer.onPointerDown(e, motions.get(item.id) as IconMotion)}
-            onPointerMove={(e) => pointer.onPointerMove(e, motions.get(item.id) as IconMotion)}
-            onPointerUp={(e) => pointer.onPointerUp(e, motions.get(item.id) as IconMotion)}
-            onPointerCancel={() => pointer.onPointerCancel(motions.get(item.id) as IconMotion)}
+            {...collection.getSlotProps(item.id)}
           />
         </button>
       ))}
-      <AppIcon3DCollection containerRef={containerRef} items={items} motions={motions} />
+      <AppIcon3DCollection
+        containerRef={containerRef}
+        items={items}
+        motions={collection.motions}
+      />
     </div>
   );
 }
 ```
 
-`AppIcon3DCollection` owns viewport/tab-visibility gating (it stops its render loop off-screen or on a
-hidden tab), WebGL context-loss detection (call your `onContextLost` to swap in a flat fallback),
-and shared geometry across every item. Its studio environment is owned by that collection's renderer,
-so separate canvases cannot dispose one another's resources. Use `iconScale` or an item's `scale`
-when an icon should be optically smaller than its measured DOM slot. It never renders DOM markup,
-so it composes with a grid, a list, or anything
-else your layout needs.
+`AppIcon3DCollection` portals one pointer-free canvas to `document.body`, clips it to the visible
+intersection of the collection and browser viewport, and mounts only visible slots plus `overscan`.
+For a scrollable or virtualized list, pass its element as `viewportRef`; the package remains a renderer
+and never owns card markup or list state. Use `portalTarget` and `zIndex` for custom stacking contexts.
+
+Textures are decoded into adaptive 128/256/512/1024 buckets, capped by `maxTextureSize`, cached per
+renderer, and evicted toward `textureCacheBytes` (64 MiB by default) once unused. Repeated URLs share
+their decoded/GPU texture. Omit `edgeColor` to sample it locally from the image perimeter.
+
+`motionMode="idle"` is the default and rotates visible icons. Use `"interaction"` to render only
+during hover/drag/inertia or `"static"` for a stationary collection. Reduced motion converts idle
+animation to interaction-only. Hidden tabs, offscreen collections, paused collections, and lost
+contexts stop rendering automatically.
+
+### Long and virtualized lists
+
+Keep DOM virtualization in your chosen list library. Attach `containerRef` to its inner layout element,
+`viewportRef` to its scrollport, spread `getSlotProps(id)` over each mounted visual slot, and pass the
+complete item/motion collections to the renderer. Only DOM slots currently mounted by the virtualizer
+can create 3D objects.
+
+The demo and CI exercise a 50-item responsive grid and a 100-item scrollport. They assert bounded
+canvas dimensions and fewer than 20 simultaneously mounted 3D icons; actual FPS remains dependent on
+device, artwork, DPR, material, and slot size.
+
+## Migrating from 0.2
+
+- `AppIcon3DCanvas` is transparent by default; add `scenePreset="dark-studio"` to preserve the old look.
+- Prefer `useAppIcon3DCollection(items)` over manually maintaining a motion map and wiring every
+  pointer handler. The lower-level APIs remain available.
+- Collection canvases are portaled and fixed instead of nested inside the layout root. Use `zIndex`
+  or `portalTarget` when the page has a custom stacking context.
+- Use `viewportRef` for nested scrolling and `motionMode` to choose idle, interaction-only, or static
+  rendering.
 
 ## CLI
 

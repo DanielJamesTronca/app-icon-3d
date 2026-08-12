@@ -44,24 +44,29 @@ The framework-free geometry and material helpers are exported too: `createAppIco
 | `autoRotate`  | `boolean`                                             | `true`               | Spins the icon when idle. Respects `prefers-reduced-motion`.                     |
 | `interactive` | `boolean`                                             | `true`               | Enables pointer-drag rotation with inertia.                                      |
 | `quality`     | `'low' \| 'medium' \| 'high'`                         | `'medium'`           | Mesh smoothness / segment count.                                                 |
+| `geometry`    | `IconGeometryOptions`                                  | —                    | Overrides size, corners, depth, bevel, and quality.                              |
+| `materialOverrides` | `IconMaterialOverrides`                         | —                    | Overrides face and edge PBR parameters.                                          |
+| `envMapIntensity` | `number`                                          | `1.1`                | Controls reflected environment strength.                                        |
 | `onReady`     | `(event: { mesh: Mesh; textureUrl: string }) => void` | —                    | Called once the mesh and texture are ready.                                      |
+| `onError`     | `(error: unknown) => void`                            | —                    | Reports image decode/load failures.                                              |
 
 `AppIcon3DCanvas` accepts all `AppIcon3D` props plus `canvasProps` (forwarded to the underlying React Three Fiber `<Canvas>`), `className`, and `style`.
+It is transparent by default. Use `scenePreset="dark-studio"` for the original backdrop or `scene`
+to customize the background, camera, environment, exposure, and lights.
 
 ## Rendering multiple icons
 
 `AppIcon3DCollection` mirrors consumer-owned DOM slots into one shared WebGL canvas. It does not
 render cards, labels, links, or a specific CSS layout, so the same component can back a grid, list,
 or any responsive collection. Give each visual slot `data-app-icon-id={item.id}`, keep interaction
-and accessibility on the DOM, and drive the mutable motion objects with `useIconPointer`.
+and accessibility on the DOM. `useAppIcon3DCollection` owns stable motion objects and pointer props;
+`useIconPointer` remains available for lower-level control.
 
 ```tsx
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import {
   AppIcon3DCollection,
-  createIconMotion,
-  useIconPointer,
-  type IconMotion
+  useAppIcon3DCollection
 } from '@danieljamestronca/app-icon-3d';
 
 const items = [
@@ -71,40 +76,42 @@ const items = [
 
 export function IconCollection() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [motions] = useState(
-    () => new Map(items.map((item, index) => [item.id, createIconMotion(index * 1.17)]))
-  );
-  const pointer = useIconPointer();
+  const collection = useAppIcon3DCollection(items);
 
   return (
     <div ref={containerRef} className="relative grid grid-cols-2 gap-4">
       {items.map((item) => {
-        const motion = motions.get(item.id) as IconMotion;
         return (
           <button key={item.id} className="relative aspect-square">
             <div
-              data-app-icon-id={item.id}
               className="absolute inset-0"
-              onPointerEnter={() => pointer.onPointerEnter(motion)}
-              onPointerLeave={() => pointer.onPointerLeave(motion)}
-              onPointerDown={(event) => pointer.onPointerDown(event, motion)}
-              onPointerMove={(event) => pointer.onPointerMove(event, motion)}
-              onPointerUp={(event) => pointer.onPointerUp(event, motion)}
-              onPointerCancel={() => pointer.onPointerCancel(motion)}
+              {...collection.getSlotProps(item.id)}
             />
           </button>
         );
       })}
-      <AppIcon3DCollection containerRef={containerRef} items={items} motions={motions} />
+      <AppIcon3DCollection
+        containerRef={containerRef}
+        items={items}
+        motions={collection.motions}
+      />
     </div>
   );
 }
 ```
 
-The collection pauses off-screen, on hidden tabs, when `paused` is true, and after context loss.
-Use `onItemReady`, `onItemError`, and `onContextLost` to coordinate flat-image fallbacks. Shared
-scene defaults can be adjusted with geometry, material, lighting, camera, shadow, DPR, motion,
-and `iconScale` props; individual items can override their preset, edge material, and optical scale.
+The collection portals one bounded canvas to `document.body`, clips it against the browser and an
+optional `viewportRef`, and mounts only visible slots plus `overscan`. Pass `portalTarget` and `zIndex`
+for custom stacking. Adaptive cached textures are capped by `maxTextureSize` (1024 by default) and
+unused entries are evicted toward `textureCacheBytes` (64 MiB by default). Omitted edge colors are
+sampled locally from the artwork.
+
+Use `motionMode="idle" | "interaction" | "static"` to choose continuous visible rotation,
+demand-driven pointer/inertia animation, or a stationary render. The collection also pauses offscreen,
+on hidden tabs, when `paused`, and during context loss, then resumes after restoration.
+
+For long lists, keep virtualization in the DOM layer: pass the scrollport as `viewportRef` and the
+virtualizer's inner layout node as `containerRef`. Only mounted, visible DOM slots receive 3D objects.
 
 ## Presets
 
