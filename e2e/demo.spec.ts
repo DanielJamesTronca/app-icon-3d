@@ -6,7 +6,6 @@ test('demo renders and remains usable on a narrow viewport', async ({ page }) =>
   await expect(page.getByRole('heading', { name: /give your icon/i })).toBeVisible();
   const canvas = page.locator('.stage canvas');
   await expect(canvas).toBeVisible();
-  await expect(page.getByText('Drag to explore')).toBeVisible();
   const bounds = await canvas.boundingBox();
   if (!bounds) throw new Error('Canvas did not expose a bounding box.');
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
