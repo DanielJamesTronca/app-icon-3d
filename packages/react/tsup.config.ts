@@ -7,5 +7,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   tsconfig: 'tsconfig.build.json',
+  banner: { js: "'use client';" },
   noExternal: ['@danieljamestronca/app-icon-3d-core']
 });

@@ -50,6 +50,8 @@ export interface AppIcon3DCollectionCamera {
   far?: number;
 }
 
+export type AppIcon3DMotionMode = 'idle' | 'interaction' | 'static';
+
 export interface AppIcon3DCollectionProps {
   /** Element whose `[data-app-icon-id]` descendants get measured and mirrored into the scene. */
   containerRef: RefObject<HTMLElement | null>;
@@ -73,6 +75,8 @@ export interface AppIcon3DCollectionProps {
   shadow?: AppIcon3DCollectionShadow | false;
   camera?: AppIcon3DCollectionCamera;
   motionTuning?: IconMotionTuning;
+  /** Idle rotates visible icons, interaction animates only pointer/spring motion, static never advances motion. */
+  motionMode?: AppIcon3DMotionMode;
   /** Defaults to the browser's prefers-reduced-motion setting when omitted. */
   reducedMotion?: boolean;
   /** External pause switch (e.g. a menu overlay open) layered on top of the built-in
@@ -167,7 +171,7 @@ function RendererSettings({ toneMappingExposure }: { toneMappingExposure: number
   return null;
 }
 
-function ContextLossListener({ onLost }: { onLost: () => void }) {
+function ContextLossListener({ onLost, onRestored }: { onLost: () => void; onRestored: () => void }) {
   const gl = useThree((state) => state.gl);
 
   useEffect(() => {
@@ -175,9 +179,14 @@ function ContextLossListener({ onLost }: { onLost: () => void }) {
       event.preventDefault();
       onLost();
     };
+    const handleContextRestored = () => onRestored();
     gl.domElement.addEventListener('webglcontextlost', handleContextLost);
-    return () => gl.domElement.removeEventListener('webglcontextlost', handleContextLost);
-  }, [gl, onLost]);
+    gl.domElement.addEventListener('webglcontextrestored', handleContextRestored);
+    return () => {
+      gl.domElement.removeEventListener('webglcontextlost', handleContextLost);
+      gl.domElement.removeEventListener('webglcontextrestored', handleContextRestored);
+    };
+  }, [gl, onLost, onRestored]);
 
   return null;
 }
@@ -188,6 +197,7 @@ interface IconMeshProps {
   geometry: THREE.BufferGeometry;
   objectSize: { width: number; height: number; depth: number };
   idleMotion: boolean;
+  staticMotion: boolean;
   envMapIntensity: number;
   motionTuning: IconMotionTuning;
   shadowOpacity: number | null;
@@ -203,6 +213,7 @@ function IconMesh({
   geometry,
   objectSize,
   idleMotion,
+  staticMotion,
   envMapIntensity,
   motionTuning,
   shadowOpacity,
@@ -236,7 +247,12 @@ function IconMesh({
     }
   }, [item.src, texture, onReady]);
 
+  useLayoutEffect(() => {
+    if (groupRef.current) applyIconMotion(groupRef.current, motion, motionTuning);
+  }, [motion, motionTuning]);
+
   useFrame(({ clock }, rawDelta) => {
+    if (staticMotion) return;
     updateIconMotion(motion, rawDelta, clock.getElapsedTime(), { idle: idleMotion }, motionTuning);
     if (groupRef.current) applyIconMotion(groupRef.current, motion, motionTuning);
   });
@@ -309,6 +325,7 @@ export function AppIcon3DCollection({
   shadow = DEFAULT_SHADOW,
   camera,
   motionTuning = DEFAULT_ICON_MOTION_TUNING,
+  motionMode = 'idle',
   reducedMotion,
   paused = false,
   dpr,
@@ -363,23 +380,20 @@ export function AppIcon3DCollection({
       return;
     }
 
-    const tiles = Array.from(container.querySelectorAll<HTMLElement>('[data-app-icon-id]'));
-
-    if (isDev && items.length > 0 && tiles.length === 0 && !warnedRef.current) {
-      warnedRef.current = true;
-      console.warn(
-        '[AppIcon3DCollection] Found 0 elements with a [data-app-icon-id] attribute inside containerRef, ' +
-          `but received ${items.length} item(s). Give each item's DOM overlay element ` +
-          'data-app-icon-id={item.id} so AppIcon3DCollection can measure and position it — see the README usage example.'
-      );
-    }
+    const resizeObserver = new ResizeObserver(() => measure());
+    let observedTiles: HTMLElement[] = [];
 
     const measure = () => {
       const containerRect = container.getBoundingClientRect();
       const next: Record<string, IconLayout> = {};
+      const tiles = Array.from(container.querySelectorAll<HTMLElement>('[data-app-icon-id]'));
 
       for (const tile of tiles) {
         const id = tile.dataset.appIconId!;
+        if (isDev && next[id] && !warnedRef.current) {
+          warnedRef.current = true;
+          console.warn(`[AppIcon3DCollection] Duplicate DOM slot id "${id}"; only the last slot is used.`);
+        }
         const rect = tile.getBoundingClientRect();
         next[id] = {
           left: rect.left - containerRect.left,
@@ -392,12 +406,50 @@ export function AppIcon3DCollection({
       setLayouts(next);
     };
 
-    measure();
-    const resizeObserver = new ResizeObserver(measure);
+    const observeTiles = () => {
+      observedTiles.forEach((tile) => resizeObserver.unobserve(tile));
+      observedTiles = Array.from(
+        container.querySelectorAll<HTMLElement>('[data-app-icon-id]')
+      );
+      if (isDev && items.length > 0 && observedTiles.length === 0 && !warnedRef.current) {
+        warnedRef.current = true;
+        console.warn(
+          '[AppIcon3DCollection] Found 0 elements with a [data-app-icon-id] attribute inside containerRef, ' +
+            `but received ${items.length} item(s). Give each item's DOM overlay element ` +
+            'data-app-icon-id={item.id} so AppIcon3DCollection can measure and position it.'
+        );
+      }
+      observedTiles.forEach((tile) => resizeObserver.observe(tile));
+      measure();
+    };
+
     resizeObserver.observe(container);
-    tiles.forEach((tile) => resizeObserver.observe(tile));
-    return () => resizeObserver.disconnect();
+    observeTiles();
+    const mutationObserver = new MutationObserver(observeTiles);
+    mutationObserver.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-app-icon-id']
+    });
+    return () => {
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+    };
   }, [containerRef, itemIdsKey, items.length]);
+
+  useEffect(() => {
+    if (!isDev) return;
+    const seen = new Set<string>();
+    for (const item of items) {
+      const id = String(item.id);
+      if (seen.has(id)) {
+        console.warn(`[AppIcon3DCollection] Duplicate item id "${id}"; ids must be unique.`);
+        return;
+      }
+      seen.add(id);
+    }
+  }, [itemIdsKey, items]);
 
   const resolvedDpr = useMemo(() => dpr ?? getDefaultDpr(), [dpr]);
   const resolvedCamera = useMemo(() => ({ ...DEFAULT_CAMERA, ...camera }), [camera]);
@@ -428,8 +480,7 @@ export function AppIcon3DCollection({
     setContextLost(true);
     onContextLost?.();
   }, [onContextLost]);
-
-  if (contextLost) return null;
+  const handleContextRestored = useCallback(() => setContextLost(false), []);
 
   return (
     <div
@@ -456,7 +507,7 @@ export function AppIcon3DCollection({
         dpr={resolvedDpr}
         frameloop={active ? 'always' : 'never'}
       >
-        <ContextLossListener onLost={handleContextLost} />
+        <ContextLossListener onLost={handleContextLost} onRestored={handleContextRestored} />
         <RendererSettings toneMappingExposure={toneMappingExposure} />
         <SceneEnvironment intensity={environmentIntensity} rotationY={environmentRotationY} />
         <ambientLight intensity={ambientLightIntensity} />
@@ -477,7 +528,8 @@ export function AppIcon3DCollection({
               item={item}
               motion={motion}
               geometry={sharedGeometry}
-              idleMotion={!effectiveReducedMotion}
+              idleMotion={motionMode === 'idle' && !effectiveReducedMotion}
+              staticMotion={motionMode === 'static'}
               envMapIntensity={envMapIntensity}
               motionTuning={motionTuning}
               shadowOpacity={shadowEnabled && shadow ? shadow.opacity : null}
