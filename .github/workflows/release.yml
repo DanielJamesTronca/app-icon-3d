@@ -25,7 +25,7 @@ jobs:
       - run: npm install --global npm@11
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - uses: changesets/action@v1
+      - uses: changesets/action@v2
         with:
           version: pnpm changeset version
           publish: pnpm changeset publish
